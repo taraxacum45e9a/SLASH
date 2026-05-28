@@ -187,6 +187,9 @@ After a device is removed from the PCI hierarchy, mapped BAR regions remain acce
 memory. However, all physical accesses will return ``0xFFFFFFFF`` (PCIe completion timeout) and
 writes are silently discarded.
 
+After a device is removed from the PCI hierarchy, mapped BAR regions remain accessible in virtual
+memory but their behavior is undefined. Userspace should treat the mapping as invalid after removal..
+
 IOCTL Reference
 ---------------
 
@@ -555,7 +558,9 @@ kernel writes back ``qid``.
   supported
 - ``mode`` must be 0 (MM); streaming mode (1) is not yet supported
 - All ring size indices must be in ``[0, 15]``
-- At most 256 concurrent queue pairs per device
+- At most 256 concurrent queue pairs per device. The actual ceiling is lower in practice and
+  depends on how many queues libqdma's resource manager makes available to the calling process
+  (the 256-slot pool is shared across all PCI functions of the device).
 
 **Postconditions:**
 
@@ -569,7 +574,7 @@ kernel writes back ``qid``.
 - ``-EINVAL`` — invalid ``dir_mask``, ``mode``, or ring size index
 - ``-EOPNOTSUPP`` — streaming mode or completion queue requested (not yet supported)
 - ``-ENOMEM`` — allocation failure
-- ``-EBUSY`` — all 256 qpair IDs in use
+- ``-EBUSY`` — no qpair IDs available (the per-process queue ceiling has been reached)
 - ``-ENODEV`` — device shutting down
 - Other negative errno from libqdma's ``qdma_queue_add()``
 
