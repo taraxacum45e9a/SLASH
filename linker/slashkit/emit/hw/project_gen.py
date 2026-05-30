@@ -24,6 +24,7 @@ from enum import Enum
 from pathlib import Path
 import logging
 import re
+import shlex
 import shutil
 import subprocess
 import importlib.resources as resources
@@ -66,6 +67,7 @@ def _copy_checked(src: Path, dest: Path) -> None:
     if not src.exists():
         raise FileNotFoundError(f"Expected file not found: {src}")
     dest.parent.mkdir(parents=True, exist_ok=True)
+    logger.info(shlex.join(['install', '-D', str(src), str(dest)]))
     shutil.copy2(src, dest)
 
 
@@ -82,12 +84,16 @@ def _copy_files(src_files: list[Path], destination: Path) -> None:
                     continue
             except FileNotFoundError:
                 pass
+
+        logger.info(shlex.join(['cp', '-a', str(src), str(dst)]))
         shutil.copy2(src, dst)
 
 
 def _copy_tree(src_dir: Path, destination: Path) -> None:
     target_dir = destination / src_dir.name
     target_dir.parent.mkdir(parents=True, exist_ok=True)
+
+    logger.info(shlex.join(['cp', '-r', str(src_dir), str(target_dir)]))
     shutil.copytree(src_dir, target_dir, dirs_exist_ok=True)
 
 
@@ -118,20 +124,19 @@ def _generate_top_wrapper_pdi_with_bootgen(impl_dir: Path) -> Path:
     _ensure_boot_device_pcie_in_bif(bif_path)
     logger.info("Running bootgen in %s to generate %s",
                 impl_dir, output_pdi.name)
-    subprocess.run(
-        [
-            "bootgen",
-            "-arch",
-            "versal",
-            "-image",
-            bif_path.name,
-            "-w",
-            "-o",
-            output_pdi.name,
-        ],
-        cwd=impl_dir,
-        check=True,
-    )
+
+    cmd = [
+        "bootgen",
+        "-arch",
+        "versal",
+        "-image",
+        bif_path.name,
+        "-w",
+        "-o",
+        output_pdi.name,
+    ]
+    logger.info(shlex.join(str(a) for a in cmd))
+    subprocess.run(cmd, cwd=impl_dir, check=True)
 
     if not output_pdi.exists():
         raise FileNotFoundError(
@@ -183,6 +188,7 @@ def generate_base_pdi_with_aved(config: CommandConfiguration) -> Path:
             _copy_checked(in_path, target_dir / file_name)
 
     logger.info("Running AVED build script in %s", aved_hw_dir)
+    logger.info(shlex.join(["bash", "build_all.sh"]))
     subprocess.run(
         ["bash", "build_all.sh"],
         cwd=aved_hw_dir,
@@ -228,6 +234,7 @@ def create_build_project(
 
         cmd.append(str(config.n_jobs))
 
+        logger.info(shlex.join(str(a) for a in cmd))
         subprocess.run(cmd, cwd=config.build_dir, check=True,
                        env=_environment_with_udev_ld_preload())
 
@@ -394,6 +401,7 @@ def install_static_shell(config: InstallerConfiguration) -> None:
     _copy_files([aved_pdi_path], static_shell_dir)
 
     def add_init_files(path: Path):
+        logger.info(shlex.join(['touch', str(path / "__init__.py")]))
         (path / "__init__.py").touch()
         for sub_path in path.iterdir():
             if not sub_path.is_dir():
