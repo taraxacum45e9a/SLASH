@@ -71,6 +71,14 @@ puts "IP REPOS:       $iprepos"
 puts "ACTION:         $action"
 puts "BUILD DIR:      $cwd"
 
+proc safe_source {tcl_path} {
+  puts "INFO: Sourcing $tcl_path ..."
+  catch {source $tcl_path} result
+  if {[string is integer -strict $result] && $result != 0} {
+    puts "EXIT: '$tcl_path' returned $result"
+    exit 1
+  }
+}
 
 set proj_exists [file normalize [file join $cwd "${design_name}.xpr"]]
 if {![file exists $proj_exists]} {
@@ -84,14 +92,14 @@ if {![file exists $proj_exists]} {
   update_ip_catalog
 
   # Base shell / containers
-  source [file normalize [file join $src_dir "slash_base.tcl"]]
-  source [file normalize [file join $src_dir "service_layer.tcl"]]
-  source [file normalize [file join $src_dir "top.tcl"]]
-  source [file normalize [file join $src_dir "enable_dfx_bdc.tcl"]]
+  safe_source [file normalize [file join $src_dir "slash_base.tcl"]]
+  safe_source [file normalize [file join $src_dir "service_layer.tcl"]]
+  safe_source [file normalize [file join $src_dir "top.tcl"]]
+  safe_source [file normalize [file join $src_dir "enable_dfx_bdc.tcl"]]
 
   # Wrapper / XDC / build
-  source [file normalize [file join $src_dir "make_wrapper.tcl"]]
-  source [file normalize [file join $src_dir "add_constraints.tcl"]]
+  safe_source [file normalize [file join $src_dir "make_wrapper.tcl"]]
+  safe_source [file normalize [file join $src_dir "add_constraints.tcl"]]
 } else {
   puts "INFO: Project already exists; opening '$proj_exists'."
   open_project [file normalize [file join $cwd "slash.xpr"]]
@@ -105,7 +113,7 @@ if {![file exists $proj_exists]} {
 }
 
 if {$do_build} {
-  source [file normalize [file join $src_dir "build_project.tcl"]]
+  safe_source [file normalize [file join $src_dir "build_project.tcl"]]
   build_project $project_name
   puts "INFO: Project build complete."
 } elseif {$do_create} {
