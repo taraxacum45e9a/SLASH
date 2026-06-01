@@ -125,6 +125,7 @@ set slash_proj_name "slash_${proj_name}"
 set slash_rm_name "${slash_proj_name}_rm"
 
 create_project $slash_proj_name $rm_work_dir -part xcv80-lsva4737-2MHP-e-S -force
+set_property board_part xilinx.com:v80:part0:1.0 [current_project]
 
 set_property ip_repo_paths [list $ip_repo] [current_project]
 update_ip_catalog

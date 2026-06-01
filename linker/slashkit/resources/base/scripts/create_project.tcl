@@ -114,6 +114,7 @@ if {![file exists $proj_exists]} {
   }
   puts "INFO: Creating new project '$design_name' in '$cwd' ..."
   create_project $design_name $cwd -part xcv80-lsva4737-2MHP-e-S -force
+  set_property board_part xilinx.com:v80:part0:1.0 [current_project]
   set_property ip_repo_paths $iprepos [current_project]
   update_ip_catalog
 
