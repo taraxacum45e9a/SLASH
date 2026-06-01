@@ -26,6 +26,7 @@ set bd_name "{{ bd_name }}"
 set part "{{ part }}"
 
 create_project sim_prj "${sim_prj_dir}" -part ${part} -force
+set_property board_part xilinx.com:v80:part0:1.0 [current_project]
 
 add_files -norecurse ${sim_mem_path}
 update_compile_order -fileset sources_1
