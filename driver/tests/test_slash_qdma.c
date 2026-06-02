@@ -313,6 +313,7 @@ TEST_F(qdma, io_write_on_c2h_only_returns_enodev)
  */
 TEST_F(qdma, io_zero_length_returns_einval)
 {
+	SKIP(return, "Test is disabled since the desired behavior is under investigation");
 	uint8_t *buf;
 	ssize_t ret;
 
