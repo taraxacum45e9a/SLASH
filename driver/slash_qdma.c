@@ -83,12 +83,17 @@
                              SLASH_QDMA_DIR_CMPT)
 
 /*
- * Minimum user_size accepted by each input-bearing QDMA ioctl. Set to the
- * end-offset of the trailing input field — callers with a smaller user_size
- * would silently send zero-filled inputs after the versioned copy-in, so the
- * handler must refuse with -EINVAL before acting on them. QDMA_IOCTL_INFO has
- * no input fields beyond `size` and intentionally enforces no minimum.
+ * Minimum user_size accepted by each QDMA ioctl. For input-bearing ioctls
+ * this is the end-offset of the trailing input field — callers with a
+ * smaller user_size would silently send zero-filled inputs after the
+ * versioned copy-in, so the handler must refuse with -EINVAL before
+ * acting on them. QDMA_IOCTL_INFO has no input fields beyond `size`, so
+ * its minimum is the size field on its own — a caller passing size==0
+ * has either forgotten to initialise the struct or claimed an incoherent
+ * "my struct has zero bytes", both of which the kernel rejects.
  */
+#define SLASH_QDMA_INFO_MIN_SIZE \
+    offsetofend(struct slash_qdma_info, size)
 #define SLASH_QDMA_QPAIR_ADD_MIN_SIZE \
     offsetofend(struct slash_qdma_qpair_add, cmpt_ring_sz)
 #define SLASH_QDMA_QPAIR_OP_MIN_SIZE \
@@ -1352,6 +1357,12 @@ static int slash_qdma_ioctl_info_w(struct miscdevice *misc,
 
     if (copy_from_user(&user_size, uarg, sizeof(user_size)))
         return -EFAULT;
+
+    if (user_size < SLASH_QDMA_INFO_MIN_SIZE) {
+        dev_warn(misc->this_device,
+                 "qdma: INFO size too small (%u)\n", user_size);
+        return -EINVAL;
+    }
 
     memset(&info, 0, sizeof(info));
     info.size = sizeof(info);

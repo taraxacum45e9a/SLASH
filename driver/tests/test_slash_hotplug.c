@@ -523,28 +523,9 @@ TEST_F(hotplug, toggle_sbr_no_upstream_bridge)
  * ABI size-versioning tests
  *
  * REMOVE, TOGGLE_SBR, and HOTPLUG share slash_hotplug_copy_request,
- * which encodes the unusual "size==0 treated as sizeof" rule:
- *   - size == 0:                   accepted (treated as sizeof(struct))
- *   - 0 < size < sizeof(struct):   -EINVAL
- *   - size >= sizeof(struct):      accepted
- *
- * The size-zero tests pair size=0 with an unknown BDF and assert
- * -ENODEV — proving the size handling did NOT short-circuit (otherwise
- * we would never reach the BDF lookup). Non-destructive: no real device
- * is touched.
+ * which rejects any size < sizeof(struct) with -EINVAL. Non-destructive:
+ * no real device is touched.
  * ==================================================================== */
-
-TEST_F(hotplug, remove_size_zero_treated_as_sizeof)
-{
-	struct slash_hotplug_device_request req;
-
-	memset(&req, 0, sizeof(req));
-	req.size = 0;
-	strncpy(req.bdf, "ffff:ff:1f.7", sizeof(req.bdf) - 1);
-
-	EXPECT_EQ(-1, ioctl(self->hp_fd, SLASH_HOTPLUG_IOCTL_REMOVE, &req));
-	EXPECT_EQ(ENODEV, errno);
-}
 
 TEST_F(hotplug, remove_size_below_struct_returns_einval)
 {
@@ -558,20 +539,6 @@ TEST_F(hotplug, remove_size_below_struct_returns_einval)
 	EXPECT_EQ(EINVAL, errno);
 }
 
-TEST_F(hotplug, toggle_sbr_size_zero_treated_as_sizeof)
-{
-	struct slash_hotplug_device_request req;
-
-	memset(&req, 0, sizeof(req));
-	req.size = 0;
-	/* TOGGLE_SBR resolves the upstream bridge by bus number — use a BDF
-	 * whose bus does not exist so the lookup fails with -ENODEV. */
-	strncpy(req.bdf, "ffff:ff:00.0", sizeof(req.bdf) - 1);
-
-	EXPECT_EQ(-1, ioctl(self->hp_fd, SLASH_HOTPLUG_IOCTL_TOGGLE_SBR, &req));
-	EXPECT_EQ(ENODEV, errno);
-}
-
 TEST_F(hotplug, toggle_sbr_size_below_struct_returns_einval)
 {
 	struct slash_hotplug_device_request req;
@@ -582,18 +549,6 @@ TEST_F(hotplug, toggle_sbr_size_below_struct_returns_einval)
 
 	EXPECT_EQ(-1, ioctl(self->hp_fd, SLASH_HOTPLUG_IOCTL_TOGGLE_SBR, &req));
 	EXPECT_EQ(EINVAL, errno);
-}
-
-TEST_F(hotplug, hotplug_size_zero_treated_as_sizeof)
-{
-	struct slash_hotplug_device_request req;
-
-	memset(&req, 0, sizeof(req));
-	req.size = 0;
-	strncpy(req.bdf, "ffff:ff:1f.7", sizeof(req.bdf) - 1);
-
-	EXPECT_EQ(-1, ioctl(self->hp_fd, SLASH_HOTPLUG_IOCTL_HOTPLUG, &req));
-	EXPECT_EQ(ENODEV, errno);
 }
 
 TEST_F(hotplug, hotplug_size_below_struct_returns_einval)

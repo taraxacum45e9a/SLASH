@@ -407,23 +407,15 @@ TEST_F(ctldev, get_bar_fd_oversized_struct_zeros_tail)
 	free(buf);
 }
 
-TEST_F(ctldev, get_device_info_accepts_zero_size)
+TEST_F(ctldev, get_device_info_size_zero_returns_einval)
 {
-	unsigned char buf[sizeof(struct slash_ioctl_device_info)];
-	__u32 size_field = 0;
-	size_t i;
+	struct slash_ioctl_device_info info;
 
-	memset(buf, SLASH_TEST_CANARY, sizeof(buf));
-	memcpy(buf, &size_field, sizeof(size_field));
-
-	EXPECT_EQ(0, ioctl(self->ctl_fd,
-					   SLASH_CTLDEV_IOCTL_GET_DEVICE_INFO, buf));
-
-	/* size=0 means the kernel writes 0 bytes back; bytes beyond the
-	 * caller-set size field must still hold the canary. */
-	for (i = sizeof(__u32); i < sizeof(buf); i++)
-		EXPECT_EQ(SLASH_TEST_CANARY, buf[i])
-		TH_LOG("byte %zu was modified despite size=0", i);
+	memset(&info, 0, sizeof(info));
+	info.size = 0;
+	EXPECT_EQ(-1, ioctl(self->ctl_fd,
+						SLASH_CTLDEV_IOCTL_GET_DEVICE_INFO, &info));
+	EXPECT_EQ(EINVAL, errno);
 }
 
 TEST_F(ctldev, get_device_info_undersized_truncates_output)

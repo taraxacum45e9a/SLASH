@@ -309,14 +309,17 @@ fd with a physical board and with the matching QDMA control device.
 
 **Direction:** ``_IOWR`` — userspace writes ``size``; the kernel writes back all output fields.
 
-**Preconditions:** None. This ioctl carries no input fields beyond ``size``; any ``size`` value
-is accepted.
+**Preconditions:**
+
+- ``size`` must cover at least the ``size`` field itself (``size >= sizeof(__u32)``) — otherwise
+  ``-EINVAL``. This ioctl carries no input fields beyond ``size``, so the minimum is just the
+  ``size`` field on its own.
 
 **Postconditions:**
 
 - The output is truncated to ``min(size, sizeof(struct))`` bytes. Fields whose tail lies beyond
   the user-supplied ``size`` are not written; the corresponding bytes in the user buffer are left
-  untouched. With ``size == 0`` no bytes are written back at all.
+  untouched.
 - If ``size > sizeof(struct)``, the trailing bytes of the user buffer are zero-filled.
 - Within the written range, all output fields are populated and ``bdf`` is a NUL-terminated string
   in ``DDDD:BB:SS.F`` format with full domain.
@@ -325,6 +328,7 @@ is accepted.
 
 - ``0`` — success
 - ``-EFAULT`` — copy failure
+- ``-EINVAL`` — ``size`` too small (below ``sizeof(__u32)``)
 
 Memory transfers via QDMA: ``/dev/slash_qdma_ctl<N>``
 =====================================================
@@ -498,21 +502,25 @@ based on the returned values in the current implementation.
 
 **Direction:** ``_IOWR`` — userspace writes ``size``; the kernel writes back all output fields.
 
-**Preconditions:** None. This ioctl carries no input fields beyond ``size``; any ``size`` value
-is accepted.
+**Preconditions:**
+
+- ``size`` must cover at least the ``size`` field itself (``size >= sizeof(__u32)``) — otherwise
+  ``-EINVAL``. This ioctl carries no input fields beyond ``size``, so the minimum is just the
+  ``size`` field on its own.
 
 **Postconditions:**
 
 - All output fields are set to 0 in the current implementation.
 - The output is truncated to ``min(size, sizeof(struct))`` bytes. Fields whose tail lies beyond
   the user-supplied ``size`` are not written; the corresponding bytes in the user buffer are left
-  untouched. With ``size == 0`` no bytes are written back at all.
+  untouched.
 - If ``size > sizeof(struct)``, the trailing bytes of the user buffer are zero-filled.
 
 **Return values:**
 
 - ``0`` — success
 - ``-EFAULT`` — copy failure
+- ``-EINVAL`` — ``size`` too small (below ``sizeof(__u32)``)
 - ``-ENODEV`` — device shutting down or QDMA handle not open
 
 ``SLASH_QDMA_IOCTL_QPAIR_ADD``
@@ -782,7 +790,7 @@ struct:
     #define SLASH_HOTPLUG_BDF_LEN 32
 
     struct slash_hotplug_device_request {
-        __u32 size;                        /* ABI version; 0 is accepted (treated as sizeof) */
+        __u32 size;                        /* ABI version: set to sizeof(struct) */
         char  bdf[SLASH_HOTPLUG_BDF_LEN]; /* NUL-terminated PCI BDF, e.g. "0000:03:00.0" */
     };
 
@@ -831,7 +839,7 @@ callback. The corresponding ``/dev/slash_ctl<N>`` or ``/dev/slash_qdma_ctl<N>`` 
 **Preconditions:**
 
 - ``bdf`` must be a valid, parseable ``DDDD:BB:SS.F`` string (or empty for single-device shorthand)
-- ``size`` must cover the ``bdf`` field (or be 0, treated as ``sizeof``)
+- ``size`` must cover the ``bdf`` field — otherwise ``-EINVAL``
 
 **Postconditions:**
 
@@ -864,7 +872,7 @@ after the call returns before rescanning.
 
 **Preconditions:**
 
-- ``size`` must cover the ``bdf`` field (or be 0, treated as ``sizeof``) — otherwise ``-EINVAL``
+- ``size`` must cover the ``bdf`` field — otherwise ``-EINVAL``
 - ``bdf`` must be a valid ``DDDD:BB:SS.F`` string; only the domain and bus number are used to
   locate the upstream bridge
 - The endpoint device may have been removed before calling; the kernel resolves the bridge via the
@@ -902,7 +910,7 @@ is needed.
 
 **Preconditions:**
 
-- ``size`` must cover the ``bdf`` field (or be 0, treated as ``sizeof``) — otherwise ``-EINVAL``
+- ``size`` must cover the ``bdf`` field — otherwise ``-EINVAL``
 - ``bdf`` must be a valid, parseable ``DDDD:BB:SS.F`` string
 - The device and its parent bus must exist in the PCI subsystem
 

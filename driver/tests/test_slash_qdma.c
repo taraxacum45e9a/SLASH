@@ -530,22 +530,14 @@ TEST_F(qdma, transfer_ddr)
  * All four handlers honour the oversized-tail-zero-fill contract.
  */
 
-TEST_F(qdma, info_accepts_zero_size_writes_nothing)
+TEST_F(qdma, info_size_zero_returns_einval)
 {
-	unsigned char buf[sizeof(struct slash_qdma_info)];
-	__u32 size_field = 0;
-	size_t i;
+	struct slash_qdma_info info;
 
-	memset(buf, SLASH_TEST_CANARY, sizeof(buf));
-	memcpy(buf, &size_field, sizeof(size_field));
-
-	EXPECT_EQ(0, ioctl(self->ctl_fd, SLASH_QDMA_IOCTL_INFO, buf));
-
-	/* size=0 means the kernel writes 0 bytes back; bytes beyond the
-	 * size field must still hold the canary. */
-	for (i = sizeof(__u32); i < sizeof(buf); i++)
-		EXPECT_EQ(SLASH_TEST_CANARY, buf[i])
-		TH_LOG("byte %zu was modified despite size=0", i);
+	memset(&info, 0, sizeof(info));
+	info.size = 0;
+	EXPECT_EQ(-1, ioctl(self->ctl_fd, SLASH_QDMA_IOCTL_INFO, &info));
+	EXPECT_EQ(EINVAL, errno);
 }
 
 TEST_F(qdma, info_undersized_truncates_output)
