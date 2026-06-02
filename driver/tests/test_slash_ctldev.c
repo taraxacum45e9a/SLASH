@@ -264,4 +264,207 @@ TEST_F(ctldev, unknown_ioctl_returns_enotty)
 	EXPECT_EQ(ENOTTY, errno);
 }
 
+/* ---------- ABI size-versioning tests ----------
+ *
+ * GET_BAR_INFO and GET_BAR_FD enforce two size gates: an input minimum
+ * (must cover the trailing input field) and a response minimum (must
+ * cover the trailing output field). Both report -EINVAL.
+ *
+ * GET_DEVICE_INFO is pure output: any size is accepted, including 0;
+ * output is truncated to min(size, sizeof(struct)).
+ *
+ * All three handlers zero-fill the trailing bytes when user_size >
+ * sizeof(struct) via clear_user().
+ */
+
+TEST_F(ctldev, get_bar_info_size_zero_returns_einval)
+{
+	struct slash_ioctl_bar_info info;
+
+	memset(&info, 0, sizeof(info));
+	info.size = 0;
+	info.bar_number = 0;
+	EXPECT_EQ(-1, ioctl(self->ctl_fd,
+						SLASH_CTLDEV_IOCTL_GET_BAR_INFO, &info));
+	EXPECT_EQ(EINVAL, errno);
+}
+
+TEST_F(ctldev, get_bar_info_size_below_input_min_returns_einval)
+{
+	struct slash_ioctl_bar_info info;
+
+	memset(&info, 0, sizeof(info));
+	/* IN_MIN covers bar_number; sizeof(__u32) (== just the size field) is
+	 * smaller than offsetof(bar_number)+sizeof(bar_number). */
+	info.size = sizeof(__u32);
+	EXPECT_EQ(-1, ioctl(self->ctl_fd,
+						SLASH_CTLDEV_IOCTL_GET_BAR_INFO, &info));
+	EXPECT_EQ(EINVAL, errno);
+}
+
+TEST_F(ctldev, get_bar_info_size_between_input_min_and_response_min_returns_einval)
+{
+	struct slash_ioctl_bar_info info;
+
+	memset(&info, 0, sizeof(info));
+	/* Pick a size that satisfies IN_MIN (covers bar_number) but is below
+	 * RESP_MIN (must cover length). offsetof(length) is strictly between
+	 * the two gates. */
+	info.size = offsetof(struct slash_ioctl_bar_info, length);
+	info.bar_number = 0;
+	EXPECT_EQ(-1, ioctl(self->ctl_fd,
+						SLASH_CTLDEV_IOCTL_GET_BAR_INFO, &info));
+	EXPECT_EQ(EINVAL, errno);
+}
+
+TEST_F(ctldev, get_bar_info_oversized_struct_zeros_tail)
+{
+	struct slash_ioctl_bar_info info;
+	uint8_t bar = 0;
+	uint64_t len = 0;
+	void *buf;
+	const size_t tail = 64;
+
+	ASSERT_EQ(0, slash_find_first_mmio_bar(self->ctl_fd, &bar, &len));
+
+	memset(&info, 0, sizeof(info));
+	info.bar_number = bar;
+	buf = slash_alloc_oversized(&info, sizeof(info), tail);
+	ASSERT_NE(NULL, buf);
+
+	EXPECT_EQ(0, ioctl(self->ctl_fd,
+					   SLASH_CTLDEV_IOCTL_GET_BAR_INFO, buf));
+	EXPECT_EQ(1, slash_tail_is_zero(buf, sizeof(info), tail))
+	TH_LOG("kernel did not zero-fill the oversized tail");
+
+	free(buf);
+}
+
+TEST_F(ctldev, get_bar_fd_size_zero_returns_einval)
+{
+	struct slash_ioctl_bar_fd_request req;
+
+	memset(&req, 0, sizeof(req));
+	req.size = 0;
+	EXPECT_EQ(-1, ioctl(self->ctl_fd,
+						SLASH_CTLDEV_IOCTL_GET_BAR_FD, &req));
+	EXPECT_EQ(EINVAL, errno);
+}
+
+TEST_F(ctldev, get_bar_fd_size_below_input_min_returns_einval)
+{
+	struct slash_ioctl_bar_fd_request req;
+
+	memset(&req, 0, sizeof(req));
+	req.size = sizeof(__u32);
+	EXPECT_EQ(-1, ioctl(self->ctl_fd,
+						SLASH_CTLDEV_IOCTL_GET_BAR_FD, &req));
+	EXPECT_EQ(EINVAL, errno);
+}
+
+TEST_F(ctldev, get_bar_fd_size_between_input_min_and_response_min_returns_einval)
+{
+	struct slash_ioctl_bar_fd_request req;
+	uint8_t bar = 0;
+	uint64_t len = 0;
+
+	ASSERT_EQ(0, slash_find_first_mmio_bar(self->ctl_fd, &bar, &len));
+
+	memset(&req, 0, sizeof(req));
+	/* Below the offset of `length` — covers `flags` but not the output. */
+	req.size = offsetof(struct slash_ioctl_bar_fd_request, length);
+	req.bar_number = bar;
+	req.flags = O_CLOEXEC;
+	EXPECT_EQ(-1, ioctl(self->ctl_fd,
+						SLASH_CTLDEV_IOCTL_GET_BAR_FD, &req));
+	EXPECT_EQ(EINVAL, errno);
+}
+
+TEST_F(ctldev, get_bar_fd_oversized_struct_zeros_tail)
+{
+	struct slash_ioctl_bar_fd_request req;
+	uint8_t bar = 0;
+	uint64_t len = 0;
+	void *buf;
+	int fd;
+	const size_t tail = 64;
+
+	ASSERT_EQ(0, slash_find_first_mmio_bar(self->ctl_fd, &bar, &len));
+
+	memset(&req, 0, sizeof(req));
+	req.bar_number = bar;
+	req.flags = O_CLOEXEC;
+	buf = slash_alloc_oversized(&req, sizeof(req), tail);
+	ASSERT_NE(NULL, buf);
+
+	fd = ioctl(self->ctl_fd, SLASH_CTLDEV_IOCTL_GET_BAR_FD, buf);
+	EXPECT_GE(fd, 0);
+	EXPECT_EQ(1, slash_tail_is_zero(buf, sizeof(req), tail))
+	TH_LOG("kernel did not zero-fill the oversized tail");
+
+	if (fd >= 0)
+		close(fd);
+	free(buf);
+}
+
+TEST_F(ctldev, get_device_info_accepts_zero_size)
+{
+	unsigned char buf[sizeof(struct slash_ioctl_device_info)];
+	__u32 size_field = 0;
+	size_t i;
+
+	memset(buf, SLASH_TEST_CANARY, sizeof(buf));
+	memcpy(buf, &size_field, sizeof(size_field));
+
+	EXPECT_EQ(0, ioctl(self->ctl_fd,
+					   SLASH_CTLDEV_IOCTL_GET_DEVICE_INFO, buf));
+
+	/* size=0 means the kernel writes 0 bytes back; bytes beyond the
+	 * caller-set size field must still hold the canary. */
+	for (i = sizeof(__u32); i < sizeof(buf); i++)
+		EXPECT_EQ(SLASH_TEST_CANARY, buf[i])
+		TH_LOG("byte %zu was modified despite size=0", i);
+}
+
+TEST_F(ctldev, get_device_info_undersized_truncates_output)
+{
+	struct slash_ioctl_device_info info;
+	uint16_t canary_u16 = ((uint16_t)SLASH_TEST_CANARY << 8) | SLASH_TEST_CANARY;
+
+	memset(&info, SLASH_TEST_CANARY, sizeof(info));
+	/* Size that covers the size + bdf fields but stops before vendor_id. */
+	info.size = offsetof(struct slash_ioctl_device_info, vendor_id);
+	EXPECT_EQ(0, ioctl(self->ctl_fd,
+					   SLASH_CTLDEV_IOCTL_GET_DEVICE_INFO, &info));
+
+	/* bdf is inside the user-claimed window — the kernel must populate it. */
+	EXPECT_TRUE(looks_like_bdf(info.bdf))
+	TH_LOG("bdf was not populated within the user-claimed window");
+
+	/* vendor_id and the trailing IDs are beyond user_size — the kernel
+	 * must NOT touch them (no copy_to_user, no clear_user). */
+	EXPECT_EQ(canary_u16, info.vendor_id);
+	EXPECT_EQ(canary_u16, info.device_id);
+	EXPECT_EQ(canary_u16, info.subsystem_vendor_id);
+	EXPECT_EQ(canary_u16, info.subsystem_device_id);
+}
+
+TEST_F(ctldev, get_device_info_oversized_struct_zeros_tail)
+{
+	struct slash_ioctl_device_info info;
+	void *buf;
+	const size_t tail = 64;
+
+	memset(&info, 0, sizeof(info));
+	buf = slash_alloc_oversized(&info, sizeof(info), tail);
+	ASSERT_NE(NULL, buf);
+
+	EXPECT_EQ(0, ioctl(self->ctl_fd,
+					   SLASH_CTLDEV_IOCTL_GET_DEVICE_INFO, buf));
+	EXPECT_EQ(1, slash_tail_is_zero(buf, sizeof(info), tail))
+	TH_LOG("kernel did not zero-fill the oversized tail");
+
+	free(buf);
+}
+
 TEST_HARNESS_MAIN

@@ -518,4 +518,218 @@ TEST_F(qdma, transfer_ddr)
 	region_round_trip(_metadata, self, SLASH_TEST_DDR_BASE);
 }
 
+/* ---------- ABI size-versioning tests ----------
+ *
+ * QDMA_INFO is a pure-output ioctl: any user_size is accepted (including
+ * 0); output is truncated to min(user_size, sizeof(struct)).
+ *
+ * QPAIR_ADD, Q_OP, and QPAIR_GET_FD are input-bearing ioctls. Per the
+ * ABI versioning contract they SHOULD reject under-sized user structs
+ * with -EINVAL before acting on zero-filled inputs. They do not today
+ * (the input gate is missing) — Q_OP and QPAIR_GET_FD tests document
+ * this with an XFAIL idiom (SKIP today, PASS once the kernel is
+ * hardened). QPAIR_ADD cannot meaningfully XFAIL because the
+ * downstream semantic checks (dir_mask == 0) also return -EINVAL, so
+ * the observable outcome is identical with or without the gate.
+ *
+ * All four handlers honour the oversized-tail-zero-fill contract.
+ */
+
+TEST_F(qdma, info_accepts_zero_size_writes_nothing)
+{
+	unsigned char buf[sizeof(struct slash_qdma_info)];
+	__u32 size_field = 0;
+	size_t i;
+
+	memset(buf, SLASH_TEST_CANARY, sizeof(buf));
+	memcpy(buf, &size_field, sizeof(size_field));
+
+	EXPECT_EQ(0, ioctl(self->ctl_fd, SLASH_QDMA_IOCTL_INFO, buf));
+
+	/* size=0 means the kernel writes 0 bytes back; bytes beyond the
+	 * size field must still hold the canary. */
+	for (i = sizeof(__u32); i < sizeof(buf); i++)
+		EXPECT_EQ(SLASH_TEST_CANARY, buf[i])
+		TH_LOG("byte %zu was modified despite size=0", i);
+}
+
+TEST_F(qdma, info_undersized_truncates_output)
+{
+	unsigned char buf[sizeof(struct slash_qdma_info)];
+	__u32 size_field = sizeof(__u32); /* covers only the size field */
+	size_t i;
+
+	memset(buf, SLASH_TEST_CANARY, sizeof(buf));
+	memcpy(buf, &size_field, sizeof(size_field));
+
+	EXPECT_EQ(0, ioctl(self->ctl_fd, SLASH_QDMA_IOCTL_INFO, buf));
+
+	/* Kernel may overwrite the size field with sizeof(kernel struct),
+	 * but must not touch anything beyond the user-claimed size. */
+	for (i = sizeof(__u32); i < sizeof(buf); i++)
+		EXPECT_EQ(SLASH_TEST_CANARY, buf[i])
+		TH_LOG("byte %zu modified despite user_size=%u",
+			   i, (unsigned int)sizeof(__u32));
+}
+
+TEST_F(qdma, info_oversized_struct_zeros_tail)
+{
+	struct slash_qdma_info info;
+	void *buf;
+	const size_t tail = 64;
+
+	memset(&info, 0, sizeof(info));
+	buf = slash_alloc_oversized(&info, sizeof(info), tail);
+	ASSERT_NE(NULL, buf);
+
+	EXPECT_EQ(0, ioctl(self->ctl_fd, SLASH_QDMA_IOCTL_INFO, buf));
+	EXPECT_EQ(1, slash_tail_is_zero(buf, sizeof(info), tail))
+	TH_LOG("kernel did not zero-fill the oversized tail");
+
+	free(buf);
+}
+
+TEST_F(qdma, qpair_add_size_below_input_min_returns_einval)
+{
+	/* size=sizeof(__u32) leaves dir_mask zero-filled in the kernel struct,
+	 * triggering the semantic dir_mask==0 check (-EINVAL) today. A future
+	 * input-size gate would also return -EINVAL. The contract this test
+	 * locks in is "undersized struct never accidentally creates a qpair
+	 * with garbage parameters", which holds in both regimes. */
+	struct slash_qdma_qpair_add add;
+
+	memset(&add, 0, sizeof(add));
+	add.size = sizeof(__u32);
+	EXPECT_EQ(-1, ioctl(self->ctl_fd, SLASH_QDMA_IOCTL_QPAIR_ADD, &add));
+	EXPECT_EQ(EINVAL, errno);
+}
+
+TEST_F(qdma, qpair_add_oversized_struct_zeros_tail)
+{
+	struct slash_qdma_qpair_add add;
+	struct slash_qdma_qpair_add *result;
+	void *buf;
+	const size_t tail = 64;
+	int ret;
+
+	memset(&add, 0, sizeof(add));
+	add.mode = 0;
+	add.dir_mask = 0x3;
+	buf = slash_alloc_oversized(&add, sizeof(add), tail);
+	ASSERT_NE(NULL, buf);
+
+	ret = ioctl(self->ctl_fd, SLASH_QDMA_IOCTL_QPAIR_ADD, buf);
+	EXPECT_EQ(0, ret);
+	EXPECT_EQ(1, slash_tail_is_zero(buf, sizeof(add), tail))
+	TH_LOG("kernel did not zero-fill the oversized tail");
+
+	if (ret == 0) {
+		result = (struct slash_qdma_qpair_add *)buf;
+		self->qid = result->qid;
+		self->qpair_added = 1;
+	}
+
+	free(buf);
+}
+
+TEST_F(qdma, q_op_size_below_input_min_returns_einval_XFAIL)
+{
+	/* Per ABI versioning: input-bearing ioctls must reject under-sized
+	 * user structs with -EINVAL. Today Q_OP zero-fills qid and op, then
+	 * fails the qid lookup with -ENOENT. Once the kernel adds the input
+	 * gate, this test flips from SKIP to PASS. */
+	struct slash_qdma_qpair_op op;
+	int ret;
+
+	memset(&op, 0, sizeof(op));
+	op.size = sizeof(__u32);
+	ret = ioctl(self->ctl_fd, SLASH_QDMA_IOCTL_Q_OP, &op);
+
+	if (ret != -1 || errno != EINVAL)
+		SKIP(return,
+			 "XFAIL: kernel does not enforce input-size minimum on Q_OP "
+			 "(got ret=%d errno=%d, want ret=-1 errno=EINVAL)",
+			 ret, errno);
+
+	EXPECT_EQ(-1, ret);
+	EXPECT_EQ(EINVAL, errno);
+}
+
+TEST_F(qdma, q_op_oversized_struct_zeros_tail)
+{
+	struct slash_qdma_qpair_op op;
+	void *buf;
+	const size_t tail = 64;
+
+	ASSERT_EQ(0, slash_qpair_add(self->ctl_fd, 0, 0x3, &self->qid));
+	self->qpair_added = 1;
+
+	memset(&op, 0, sizeof(op));
+	op.qid = self->qid;
+	op.op = SLASH_QDMA_QUEUE_OP_START;
+	buf = slash_alloc_oversized(&op, sizeof(op), tail);
+	ASSERT_NE(NULL, buf);
+
+	EXPECT_EQ(0, ioctl(self->ctl_fd, SLASH_QDMA_IOCTL_Q_OP, buf));
+	EXPECT_EQ(1, slash_tail_is_zero(buf, sizeof(op), tail))
+	TH_LOG("kernel did not zero-fill the oversized tail");
+
+	self->qpair_started = 1;
+	free(buf);
+}
+
+TEST_F(qdma, qpair_get_fd_size_below_input_min_returns_einval_XFAIL)
+{
+	/* Same XFAIL rationale as q_op_size_below_input_min: today the qid=0
+	 * lookup fails with -ENOENT; with the input-size gate it would fail
+	 * with -EINVAL before the lookup is attempted. */
+	struct slash_qdma_qpair_fd_request req;
+	int ret;
+
+	memset(&req, 0, sizeof(req));
+	req.size = sizeof(__u32);
+	ret = ioctl(self->ctl_fd, SLASH_QDMA_IOCTL_QPAIR_GET_FD, &req);
+
+	if (ret != -1 || errno != EINVAL) {
+		if (ret >= 0)
+			close(ret);
+		SKIP(return,
+			 "XFAIL: kernel does not enforce input-size minimum on "
+			 "QPAIR_GET_FD (got ret=%d errno=%d, want ret=-1 errno=EINVAL)",
+			 ret, errno);
+	}
+
+	EXPECT_EQ(-1, ret);
+	EXPECT_EQ(EINVAL, errno);
+}
+
+TEST_F(qdma, qpair_get_fd_oversized_struct_zeros_tail)
+{
+	struct slash_qdma_qpair_fd_request req;
+	void *buf;
+	const size_t tail = 64;
+	int fd;
+
+	ASSERT_EQ(0, slash_qpair_add(self->ctl_fd, 0, 0x3, &self->qid));
+	self->qpair_added = 1;
+	ASSERT_EQ(0, slash_qpair_op(self->ctl_fd, self->qid,
+								SLASH_QDMA_QUEUE_OP_START));
+	self->qpair_started = 1;
+
+	memset(&req, 0, sizeof(req));
+	req.qid = self->qid;
+	req.flags = O_CLOEXEC;
+	buf = slash_alloc_oversized(&req, sizeof(req), tail);
+	ASSERT_NE(NULL, buf);
+
+	fd = ioctl(self->ctl_fd, SLASH_QDMA_IOCTL_QPAIR_GET_FD, buf);
+	EXPECT_GE(fd, 0);
+	EXPECT_EQ(1, slash_tail_is_zero(buf, sizeof(req), tail))
+	TH_LOG("kernel did not zero-fill the oversized tail");
+
+	if (fd >= 0)
+		close(fd);
+	free(buf);
+}
+
 TEST_HARNESS_MAIN

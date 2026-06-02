@@ -15,12 +15,14 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
 #include <linux/dma-buf.h>
+#include <linux/types.h>
 #include <sys/ioctl.h>
 
 #include <slash/uapi/slash_interface.h>
@@ -214,6 +216,59 @@ static inline int slash_qpair_get_fd(int qdma_fd, uint32_t qid, uint32_t flags)
 	if (ret < 0)
 		return -errno;
 	return ret;
+}
+
+/* ---------- ABI size-versioning helpers ---------- */
+
+/** Sentinel byte written into the tail region of oversized ioctl buffers.
+ *  After a successful ioctl, the kernel must overwrite the tail with zeros
+ *  (clear_user); any remaining 0xAA byte indicates a contract violation. */
+#define SLASH_TEST_CANARY 0xAA
+
+/**
+ * slash_alloc_oversized() - Build an oversized ioctl argument buffer.
+ * @src:        Pointer to a properly initialised ioctl argument struct.
+ * @hdr_size:   sizeof(*src) — the kernel-known struct size.
+ * @tail_bytes: Number of extra bytes to append beyond @hdr_size.
+ *
+ * Allocates @hdr_size + @tail_bytes bytes, copies the first @hdr_size from
+ * @src, fills the trailing @tail_bytes with SLASH_TEST_CANARY, then
+ * overwrites the leading __u32 (the size field — required to be first by
+ * the ABI versioning contract) with the full buffer size so the kernel
+ * sees a "newer userspace, larger struct" call.
+ *
+ * Return: heap pointer (caller must free()), or NULL on allocation
+ * failure.
+ */
+static inline void *slash_alloc_oversized(const void *src, size_t hdr_size,
+										  size_t tail_bytes)
+{
+	void *buf = malloc(hdr_size + tail_bytes);
+
+	if (!buf)
+		return NULL;
+	memcpy(buf, src, hdr_size);
+	memset((unsigned char *)buf + hdr_size, SLASH_TEST_CANARY, tail_bytes);
+	*(__u32 *)buf = (__u32)(hdr_size + tail_bytes);
+	return buf;
+}
+
+/**
+ * slash_tail_is_zero() - Verify the kernel zero-filled an oversized tail.
+ *
+ * Return: 1 if every byte in [hdr_size, hdr_size + tail_bytes) is 0,
+ *         0 if any byte is non-zero (i.e. the canary survived).
+ */
+static inline int slash_tail_is_zero(const void *buf, size_t hdr_size,
+									 size_t tail_bytes)
+{
+	const unsigned char *p = (const unsigned char *)buf + hdr_size;
+	size_t i;
+
+	for (i = 0; i < tail_bytes; i++)
+		if (p[i] != 0)
+			return 0;
+	return 1;
 }
 
 #endif /* SLASH_TEST_HELPERS_H */
