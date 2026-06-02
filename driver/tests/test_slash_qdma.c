@@ -341,6 +341,19 @@ TEST_F(qdma, io_mmap_unsupported)
 		munmap(p, 4096);
 }
 
+TEST_F(qdma, io_ioctl_returns_enotty)
+{
+	/* The per-qpair anon_inode fd defines no ioctls; the handler
+	 * returns -ENOTTY for any cmd. Exercising this path keeps the stub
+	 * formally covered. */
+	unsigned int junk = _IO('v', 0xFE);
+
+	bring_up_qpair(_metadata, self, 0x3);
+
+	EXPECT_EQ(-1, ioctl(self->io_fd, junk, 0));
+	EXPECT_EQ(ENOTTY, errno);
+}
+
 TEST_F(qdma, io_lseek_set_cur_end)
 {
 	off_t pos;
