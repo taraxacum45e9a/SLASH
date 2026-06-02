@@ -60,6 +60,7 @@
 #include <linux/pci.h>
 #include <linux/mm.h>
 #include <linux/slab.h>
+#include <linux/stddef.h>
 #include <linux/uaccess.h>
 #include <linux/xarray.h>
 #include <linux/anon_inodes.h>
@@ -80,6 +81,20 @@
 #define SLASH_QDMA_DIR_CMPT BIT(2)
 #define SLASH_QDMA_DIR_MASK (SLASH_QDMA_DIR_H2C | SLASH_QDMA_DIR_C2H | \
                              SLASH_QDMA_DIR_CMPT)
+
+/*
+ * Minimum user_size accepted by each input-bearing QDMA ioctl. Set to the
+ * end-offset of the trailing input field — callers with a smaller user_size
+ * would silently send zero-filled inputs after the versioned copy-in, so the
+ * handler must refuse with -EINVAL before acting on them. QDMA_IOCTL_INFO has
+ * no input fields beyond `size` and intentionally enforces no minimum.
+ */
+#define SLASH_QDMA_QPAIR_ADD_MIN_SIZE \
+    offsetofend(struct slash_qdma_qpair_add, cmpt_ring_sz)
+#define SLASH_QDMA_QPAIR_OP_MIN_SIZE \
+    offsetofend(struct slash_qdma_qpair_op, op)
+#define SLASH_QDMA_QPAIR_GET_FD_MIN_SIZE \
+    offsetofend(struct slash_qdma_qpair_fd_request, flags)
 
 /**
  * SLASH_QDMA_QTYPE_COUNT - Number of queue types tracked per queue pair.
@@ -1421,6 +1436,12 @@ static int slash_qdma_ioctl_qpair_add_w(struct miscdevice *misc,
     if (copy_from_user(&user_size, uarg, sizeof(user_size)))
         return -EFAULT;
 
+    if (user_size < SLASH_QDMA_QPAIR_ADD_MIN_SIZE) {
+        dev_warn(misc->this_device,
+                 "qdma: QPAIR_ADD size too small (%u)\n", user_size);
+        return -EINVAL;
+    }
+
     memset(&req, 0, sizeof(req));
 
     if (copy_from_user(&req, uarg, min_t(size_t, user_size, sizeof(req))))
@@ -1765,6 +1786,12 @@ static int slash_qdma_ioctl_qpair_op_w(struct miscdevice *misc,
      */
     if (copy_from_user(&user_size, uarg, sizeof(user_size)))
         return -EFAULT;
+
+    if (user_size < SLASH_QDMA_QPAIR_OP_MIN_SIZE) {
+        dev_warn(misc->this_device,
+                 "qdma: Q_OP size too small (%u)\n", user_size);
+        return -EINVAL;
+    }
 
     memset(&req, 0, sizeof(req));
 
@@ -2362,10 +2389,14 @@ static int slash_qdma_ioctl_qpair_get_fd_w(struct miscdevice *misc,
     int fd;
     int err;
 
-    (void)misc;
-
     if (copy_from_user(&user_size, uarg, sizeof(user_size)))
         return -EFAULT;
+
+    if (user_size < SLASH_QDMA_QPAIR_GET_FD_MIN_SIZE) {
+        dev_warn(misc->this_device,
+                 "qdma: QPAIR_GET_FD size too small (%u)\n", user_size);
+        return -EINVAL;
+    }
 
     memset(&req, 0, sizeof(req));
 

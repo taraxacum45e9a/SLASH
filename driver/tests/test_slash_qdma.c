@@ -523,14 +523,9 @@ TEST_F(qdma, transfer_ddr)
  * QDMA_INFO is a pure-output ioctl: any user_size is accepted (including
  * 0); output is truncated to min(user_size, sizeof(struct)).
  *
- * QPAIR_ADD, Q_OP, and QPAIR_GET_FD are input-bearing ioctls. Per the
- * ABI versioning contract they SHOULD reject under-sized user structs
- * with -EINVAL before acting on zero-filled inputs. They do not today
- * (the input gate is missing) — Q_OP and QPAIR_GET_FD tests document
- * this with an XFAIL idiom (SKIP today, PASS once the kernel is
- * hardened). QPAIR_ADD cannot meaningfully XFAIL because the
- * downstream semantic checks (dir_mask == 0) also return -EINVAL, so
- * the observable outcome is identical with or without the gate.
+ * QPAIR_ADD, Q_OP, and QPAIR_GET_FD are input-bearing ioctls and reject
+ * under-sized user structs with -EINVAL before acting on zero-filled
+ * inputs, matching the ABI versioning contract.
  *
  * All four handlers honour the oversized-tail-zero-fill contract.
  */
@@ -591,11 +586,10 @@ TEST_F(qdma, info_oversized_struct_zeros_tail)
 
 TEST_F(qdma, qpair_add_size_below_input_min_returns_einval)
 {
-	/* size=sizeof(__u32) leaves dir_mask zero-filled in the kernel struct,
-	 * triggering the semantic dir_mask==0 check (-EINVAL) today. A future
-	 * input-size gate would also return -EINVAL. The contract this test
-	 * locks in is "undersized struct never accidentally creates a qpair
-	 * with garbage parameters", which holds in both regimes. */
+	/* The input-size gate (size must cover cmpt_ring_sz, the trailing
+	 * input field) rejects under-sized structs with -EINVAL before any
+	 * semantic validation runs — ensuring no qpair is ever created from
+	 * zero-filled garbage. */
 	struct slash_qdma_qpair_add add;
 
 	memset(&add, 0, sizeof(add));
@@ -632,26 +626,15 @@ TEST_F(qdma, qpair_add_oversized_struct_zeros_tail)
 	free(buf);
 }
 
-TEST_F(qdma, q_op_size_below_input_min_returns_einval_XFAIL)
+TEST_F(qdma, q_op_size_below_input_min_returns_einval)
 {
-	/* Per ABI versioning: input-bearing ioctls must reject under-sized
-	 * user structs with -EINVAL. Today Q_OP zero-fills qid and op, then
-	 * fails the qid lookup with -ENOENT. Once the kernel adds the input
-	 * gate, this test flips from SKIP to PASS. */
+	/* The input-size gate (size must cover op, the trailing input field)
+	 * rejects under-sized structs with -EINVAL before the qid lookup. */
 	struct slash_qdma_qpair_op op;
-	int ret;
 
 	memset(&op, 0, sizeof(op));
 	op.size = sizeof(__u32);
-	ret = ioctl(self->ctl_fd, SLASH_QDMA_IOCTL_Q_OP, &op);
-
-	if (ret != -1 || errno != EINVAL)
-		SKIP(return,
-			 "XFAIL: kernel does not enforce input-size minimum on Q_OP "
-			 "(got ret=%d errno=%d, want ret=-1 errno=EINVAL)",
-			 ret, errno);
-
-	EXPECT_EQ(-1, ret);
+	EXPECT_EQ(-1, ioctl(self->ctl_fd, SLASH_QDMA_IOCTL_Q_OP, &op));
 	EXPECT_EQ(EINVAL, errno);
 }
 
@@ -678,28 +661,15 @@ TEST_F(qdma, q_op_oversized_struct_zeros_tail)
 	free(buf);
 }
 
-TEST_F(qdma, qpair_get_fd_size_below_input_min_returns_einval_XFAIL)
+TEST_F(qdma, qpair_get_fd_size_below_input_min_returns_einval)
 {
-	/* Same XFAIL rationale as q_op_size_below_input_min: today the qid=0
-	 * lookup fails with -ENOENT; with the input-size gate it would fail
-	 * with -EINVAL before the lookup is attempted. */
+	/* The input-size gate (size must cover flags, the trailing input field)
+	 * rejects under-sized structs with -EINVAL before the qid lookup. */
 	struct slash_qdma_qpair_fd_request req;
-	int ret;
 
 	memset(&req, 0, sizeof(req));
 	req.size = sizeof(__u32);
-	ret = ioctl(self->ctl_fd, SLASH_QDMA_IOCTL_QPAIR_GET_FD, &req);
-
-	if (ret != -1 || errno != EINVAL) {
-		if (ret >= 0)
-			close(ret);
-		SKIP(return,
-			 "XFAIL: kernel does not enforce input-size minimum on "
-			 "QPAIR_GET_FD (got ret=%d errno=%d, want ret=-1 errno=EINVAL)",
-			 ret, errno);
-	}
-
-	EXPECT_EQ(-1, ret);
+	EXPECT_EQ(-1, ioctl(self->ctl_fd, SLASH_QDMA_IOCTL_QPAIR_GET_FD, &req));
 	EXPECT_EQ(EINVAL, errno);
 }
 
