@@ -26,5 +26,6 @@ set_property -dict [list CONFIG.ENABLE_DFX {true}] [get_bd_cells service_layer]
 set_property -dict [list CONFIG.LOCK_PROPAGATE {true}] [get_bd_cells slash]
 set_property -dict [list CONFIG.LOCK_PROPAGATE {true}] [get_bd_cells service_layer]
 
+upgrade_project -migrate_to_inline_hdl
 validate_bd_design
 save_bd_design
