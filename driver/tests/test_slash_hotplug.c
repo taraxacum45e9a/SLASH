@@ -474,6 +474,56 @@ TEST_F(hotplug, remove_then_rescan_recovers_pf1)
 	TH_LOG("not all accelerators reappeared after RESCAN");
 }
 
+TEST_F(hotplug, remove_pf1_with_live_qpair_cleans_up)
+{
+	/*
+	 * Closing the qdma_ctl fd does not release qpairs — they live on
+	 * the device, not the fd. If userspace leaks a qpair and the device
+	 * is then removed, slash_qdma_destroy_qdma_device's xa_for_each
+	 * teardown loop must stop and reclaim the leaked HW queues via
+	 * slash_qdma_ioctl_qpair_rm_q. This test exercises that path: add a
+	 * qpair, close the fd without DEL, REMOVE the PF1, then RESCAN.
+	 * Recovery is verified via poll_accelerators_present.
+	 */
+	char qdma_sysfs[64];
+	char qdma_devname[64];
+	char qdma_path[128];
+	int qdma_fd;
+	uint32_t qid;
+
+	if (getenv("SLASH_TEST_DESTRUCTIVE") == NULL)
+		SKIP(return, "remove PF1 with live queue pairs."
+					 "set SLASH_TEST_DESTRUCTIVE=1 to run");
+
+	snprintf(qdma_sysfs, sizeof(qdma_sysfs),
+			 QDMA_SYSFS_PREFIX "%s", self->accels[0].pf1_bdf);
+	ASSERT_EQ(0, get_misc_devname(qdma_sysfs, qdma_devname,
+								  sizeof(qdma_devname)));
+	snprintf(qdma_path, sizeof(qdma_path), "/dev/%s", qdma_devname);
+
+	qdma_fd = open(qdma_path, O_RDWR);
+	ASSERT_GE(qdma_fd, 0)
+	TH_LOG("open(%s) failed: %s", qdma_path, strerror(errno));
+
+	/* Add a qpair and intentionally skip DEL — the teardown loop must
+	 * reclaim it when the device disappears. Bidirectional so both
+	 * H2C and C2H queue handles need cleanup. */
+	ASSERT_EQ(0, slash_qpair_add(qdma_fd, 0 /* MM */, 0x3, &qid));
+
+	close(qdma_fd);
+
+	ASSERT_EQ(0, hp_ioctl_bdf(self->hp_fd, SLASH_HOTPLUG_IOCTL_REMOVE,
+							  self->accels[0].pf1_bdf));
+	EXPECT_EQ(0, poll_misc_absent(qdma_sysfs, NODE_RECOVERY_TIMEOUT_S))
+	TH_LOG("%s/%s did not disappear after REMOVE",
+		   SYSFS_MISC_DIR, qdma_sysfs);
+
+	ASSERT_EQ(0, ioctl(self->hp_fd, SLASH_HOTPLUG_IOCTL_RESCAN));
+	EXPECT_EQ(0, poll_accelerators_present(self->accels, self->n_accels,
+										   NODE_RECOVERY_TIMEOUT_S))
+	TH_LOG("not all accelerators reappeared after RESCAN");
+}
+
 TEST_F(hotplug, hotplug_atomic_pf2)
 {
 	/*
