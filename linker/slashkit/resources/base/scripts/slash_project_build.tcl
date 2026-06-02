@@ -152,6 +152,10 @@ foreach pre_synth_tcl $pre_synth_tcls {
     source $pre_synth_tcl
 }
 
+if {[llength [get_ips -filter {IS_LOCKED == 1}]] > 0} {
+    error "One or more IPs have been locked. Please run report_ip_status for more details and recommendations on how to fix this issue."
+}
+
 launch_runs "${slash_rm_name}_synth_1" -jobs $jobs
 wait_on_run "${slash_rm_name}_synth_1"
 

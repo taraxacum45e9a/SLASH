@@ -139,6 +139,10 @@ if {![file exists $proj_exists]} {
 }
 
 if {$do_build} {
+  if {[llength [get_ips -filter {IS_LOCKED == 1}]] > 0} {
+    error "One or more IPs have been locked. Please run report_ip_status for more details and recommendations on how to fix this issue."
+  }
+
   safe_source [file normalize [file join $src_dir "build_project.tcl"]]
   build_project $project_name $jobs
   puts "INFO: Project build complete."
