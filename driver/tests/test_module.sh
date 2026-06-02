@@ -58,5 +58,6 @@ remove_slash_module
 
 # Collect the coverage statistics
 sudo lcov --capture --directory /sys/kernel/debug/gcov$(realpath ..) --output-file coverage.info
-genhtml coverage.info --output-directory coverage
+lcov --remove coverage.info '/usr/src/*' --output-file coverage.filtered.info
+genhtml -p $(realpath ..) coverage.filtered.info --output-directory coverage
 tar -caf coverage.tar.gz coverage
