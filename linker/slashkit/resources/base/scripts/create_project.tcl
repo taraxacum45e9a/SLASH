@@ -150,6 +150,10 @@ if {![file exists $proj_exists]} {
 }
 
 if {$do_build} {
+  if {[llength [get_ips -filter {IS_LOCKED == 1}]] > 0} {
+    error "One or more IPs have been locked. Please run report_ip_status for more details and recommendations on how to fix this issue."
+  }
+
   safe_source [file normalize [file join $src_dir "build_project.tcl"]]
   build_project $project_name $jobs
   archive_project "${project_name}.impl.zip" -force -include_local_ip_cache -temp_dir "/tmp/${project_name}.[pid]"
