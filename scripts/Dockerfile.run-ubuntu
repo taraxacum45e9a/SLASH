@@ -5,6 +5,8 @@ ARG USER_ID=1000
 
 ENV DEBIAN_FRONTEND=noninteractive
 
+RUN echo 'Acquire::HTTP::Proxy "http://172.17.0.1:3142";' >/etc/apt/apt.conf.d/99-apt-cacher-ng.conf
+
 # Install base packages. lsb-release provides the lsb_release command Vivado
 # calls on every supported release. libtinfo5 (needed by Vivado) was dropped
 # after 22.04; on >= 24.04 install libtinfo6 and add a libtinfo.so.5
@@ -36,14 +38,15 @@ RUN apt install -y /tmp/slash-dev_*.deb \
   /tmp/libvrt_*.deb
 
 # Setting timezone and locale for Vivado
-ENV TZ="Europe/Dublin"
+ENV TZ="Asia/Singapore"
 RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 ENV LC_ALL=en_US.utf-8
 
 # Adding the slash user
-RUN useradd -m -U -u $USER_ID slash
+RUN useradd -m -U -u $USER_ID slash && \
+    echo "slash ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 USER slash
 
 # Again, setting timezone and locale for Vivado
-ENV TZ="Europe/Dublin"
+ENV TZ="Asia/Singapore"
 ENV LC_ALL=en_US.utf-8

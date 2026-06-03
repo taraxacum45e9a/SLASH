@@ -5,6 +5,8 @@ ARG USER_ID=1000
 
 ENV DEBIAN_FRONTEND=noninteractive
 
+RUN echo 'Acquire::HTTP::Proxy "http://172.17.0.1:3142";' >/etc/apt/apt.conf.d/99-apt-cacher-ng.conf
+
 # Install build dependencies. lsb-release provides the lsb_release command
 # Vivado calls on every supported release. A few build deps differ by release:
 #   * libtinfo5 (needed by Vivado) was dropped after 22.04; on >= 24.04 install
@@ -31,7 +33,7 @@ RUN . /etc/os-release && \
     fi
 
 # Setting timezone and locale for Vivado
-ENV TZ="Europe/Dublin"
+ENV TZ="Asia/Singapore"
 RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 ENV LC_ALL=en_US.utf-8
 
@@ -40,5 +42,5 @@ RUN useradd -m -U -u $USER_ID slash
 USER slash
 
 # Again, setting timezone and locale for Vivado
-ENV TZ="Europe/Dublin"
+ENV TZ="Asia/Singapore"
 ENV LC_ALL=en_US.utf-8
