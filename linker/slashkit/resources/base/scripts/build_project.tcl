@@ -39,6 +39,13 @@ proc build_project {{proj_name "user"} {jobs 14}} {
   set_property STEPS.WRITE_DEVICE_IMAGE.TCL.PRE  [get_files *write_device_image.pre.tcl]  [get_runs impl_1]
 
   # Launch and wait
+  launch_runs synth_1 -jobs $jobs
+  wait_on_run synth_1
+
+  puts "INFO: Synthesis complete for run 'synth_1'."
+  archive_project "../${proj_name}.synth.zip" -force -include_local_ip_cache -temp_dir "/tmp/${proj_name}.[pid]"
+
+  # Launch and wait
   launch_runs impl_1 -to_step write_bitstream -jobs $jobs
   wait_on_run impl_1
   open_run impl_1
@@ -48,4 +55,5 @@ proc build_project {{proj_name "user"} {jobs 14}} {
   write_abstract_shell -cell top_i/service_layer -force [file join $impl_output_dir "static_shell_service_layer.dcp"]
 
   puts "INFO: Implementation complete for run 'impl_1'."
+  archive_project "../${proj_name}.impl.zip" -force -include_local_ip_cache -temp_dir "/tmp/${proj_name}.[pid]"
 }
