@@ -23,7 +23,7 @@ SUBTARGET ?= all
 
 .PHONY: all clean rebuild $(SUBDIRS) build-% clean-% rebuild-%
 
-all: $(SUBDIRS)
+all: check-smbus-ip $(SUBDIRS)
 
 $(SUBDIRS):
 	$(MAKE) -C $@ $(SUBTARGET)
@@ -44,3 +44,14 @@ clean-%:
 rebuild-%:
 	$(MAKE) -C $* clean
 	$(MAKE) -C $* $(SUBTARGET)
+
+check-smbus-ip:
+	@if [ -z "$(wildcard smbus*)" ]; then \
+		echo "=======================================================================" >&2; \
+		echo "ERROR: SMBus IP (xilinx.com:ip:smbus:1.1) not found in linker/slashkit/resources/base/iprepo/." >&2; \
+		echo "Download it from https://www.xilinx.com/member/v80.html and place the IP" >&2; \
+		echo "directory into linker/slashkit/resources/base/iprepo/ before building." >&2; \
+		echo "See docs/tutorials/admin/platform-setup.rst for details." >&2; \
+		echo "=======================================================================" >&2; \
+		exit 1; \
+	fi
