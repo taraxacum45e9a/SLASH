@@ -18,11 +18,41 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 # ##################################################################################################
 
+proc get_ddrmc_elfs {} {
+  set ddrmc_elfs {}
+  foreach elf [get_files -quiet "*ddrmc.elf"] {
+    lappend ddrmc_elfs [file normalize $elf]
+  }
+  return $ddrmc_elfs
+}
+
+proc find_missing_files {filelist} {
+  set missing {}
+  foreach fpath $filelist {
+    if {![file exists $fpath]} {
+      lappend missing $fpath
+    }
+  }
+  return $missing
+}
+
 proc build_project {{proj_name "user"} {jobs 14}} {
   puts "INFO: Using proj_name='$proj_name' and jobs='$jobs'"
 
   # Ensure top BD is generated
   generate_target all [get_files "top.bd"]
+
+  # Check for missing DDRMC ELF files before proceeding
+  puts "INFO: Checking for DDRMC ELF files..."
+  set ddrmc_elfs [get_ddrmc_elfs]
+  set missing_elfs [find_missing_files $ddrmc_elfs]
+  if {[llength $missing_elfs] > 0} {
+    puts "ERROR: DDRMC output product generation did not physically produce the ELF files."
+    puts "Try: reset/regenerate BD/IP output products, then inspect IP generation logs."
+    error "DDRMC ELF missing on disk: $missing_elfs"
+  } else {
+    puts "INFO: All DDRMC ELF files are present: $ddrmc_elfs"
+  }
 
   # Static/base configuration
   create_pr_configuration -name config_1 \
