@@ -40,7 +40,11 @@ proc build_project {{proj_name "user"} {jobs 14}} {
   puts "INFO: Using proj_name='$proj_name' and jobs='$jobs'"
 
   # Ensure top BD is generated
+  puts "INFO: generate_target"
   generate_target all [get_files "top.bd"]
+
+  puts "INFO: export_ip_user_files"
+  export_ip_user_files -of_objects [get_files top.bd] -no_script -sync -force
 
   # Check for missing DDRMC ELF files before proceeding
   puts "INFO: Checking for DDRMC ELF files..."
