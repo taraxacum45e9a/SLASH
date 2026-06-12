@@ -365,7 +365,8 @@ def install_static_shell(config: InstallerConfiguration) -> None:
         config.build_dir / "AVED"
     ], check=True)
 
-    create_build_project(config)
+    create_build_project(config, "create")
+    create_build_project(config, "build")
 
     impl_dir = config.build_dir / "slash.runs" / "impl_1"
     dcp_sources = (
