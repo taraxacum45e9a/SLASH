@@ -23,6 +23,7 @@ import logging
 import os
 import threading
 import time
+from pathlib import Path
 
 from slashkit.emit.hw.tcl_gen import generate_tcl
 from slashkit.emit.hw.project_gen import (
@@ -157,6 +158,32 @@ Typical Workflow:
 """
 
 
+def setup_smbus(config) -> None:
+    import hashlib
+    import importlib.resources as resources
+    import shutil
+
+    smbus_path = Path(config._args.smbus)
+
+    with open(smbus_path, "rb") as f:
+        shasum = hashlib.sha1()
+        while True:
+            chunk = f.read(64 << 10)  # 64KB
+            if not chunk:
+                break
+            shasum.update(chunk)
+        digest = shasum.hexdigest()
+        expected_digest = "a0961c24dd3c2c242cfb85c540fa7d437e323b97"
+        if digest != expected_digest:
+            raise ValueError(
+                f"SHA1 mismatch for {smbus_path}: expected {expected_digest}, got {digest}"
+            )
+
+    with resources.path("slashkit.resources.base", "iprepo") as iprepo:
+        shutil.unpack_archive(smbus_path, format="zip",
+                              extract_dir=iprepo)
+
+
 def main():
     logging.basicConfig(
         level=logging.INFO,
@@ -175,6 +202,17 @@ def main():
     InstallerConfiguration.populate_argument_parser(install_parser)
     install_parser.set_defaults(
         config_class=InstallerConfiguration, operation=install_static_shell)
+
+    setup_parser = sub_parsers.add_parser("setup")
+    CommandConfiguration.populate_argument_parser(setup_parser)
+    setup_parser.add_argument(
+        "--smbus",
+        type=Path,
+        required=True,
+        help="Path to smbus_v1_1-20240328.zip",
+    )
+    setup_parser.set_defaults(config_class=CommandConfiguration)
+    setup_parser.set_defaults(operation=setup_smbus)
 
     args = ap.parse_args()
 
