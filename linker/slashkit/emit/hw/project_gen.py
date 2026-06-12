@@ -27,7 +27,7 @@ import re
 import shutil
 import subprocess
 import importlib.resources as resources
-from typing import Optional, Dict
+from typing import Dict, Literal
 from contextlib import ExitStack
 
 from slashkit.emit.metadata.report_util import convert_report_utilization_to_xml
@@ -199,7 +199,7 @@ def generate_base_pdi_with_aved(config: CommandConfiguration) -> Path:
 
 def create_build_project(
     config: CommandConfiguration,
-    action: Optional[str] = None
+    action: Literal["create", "build", "all"] = "all"
 ) -> None:
     log_path = config.build_dir / "vivado.log"
 
