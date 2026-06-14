@@ -109,7 +109,9 @@ if {![file exists $proj_exists]} {
   if {!$do_create} {
     error "Project not found at $proj_exists. Run with action 'create' first."
   }
-  lappend iprepos $default_iprepos
+  if {[lsearch -exact $iprepos $default_iprepos] == -1} {
+    lappend iprepos $default_iprepos
+  }
   puts "INFO: Creating new project '$design_name' in '$cwd' ..."
   create_project $design_name $cwd -part xcv80-lsva4737-2MHP-e-S -force
   set_property ip_repo_paths $iprepos [current_project]
