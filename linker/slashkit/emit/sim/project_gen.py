@@ -69,7 +69,7 @@ def create_sim_project(config: LinkerConfiguration) -> None:
         "-source",
         str(tcl),
     ]
-    subprocess.run(cmd, cwd=str(config.build_dir), check=True)
+    subprocess.run(cmd, cwd=config.build_dir, check=True)
 
 
 def build_sim_project(config: LinkerConfiguration) -> None:
@@ -78,8 +78,8 @@ def build_sim_project(config: LinkerConfiguration) -> None:
     if not xsim_dir.exists():
         raise FileNotFoundError(f"XSIM dir not found: {xsim_dir}")
 
-    subprocess.run(["./compile.sh"], cwd=str(xsim_dir), check=True)
-    subprocess.run(["./elaborate.sh"], cwd=str(xsim_dir), check=True)
+    subprocess.run(["./compile.sh"], cwd=xsim_dir, check=True)
+    subprocess.run(["./elaborate.sh"], cwd=xsim_dir, check=True)
 
     cmake_build_dir = config.build_dir / "build"
 
@@ -93,9 +93,9 @@ def build_sim_project(config: LinkerConfiguration) -> None:
     export_package("slashkit.resources.sim", sim_src_dir)
 
     subprocess.run(["cmake", str(sim_src_dir)],
-                   cwd=str(cmake_build_dir), check=True)
+                   cwd=cmake_build_dir, check=True)
     jobs = str(os.cpu_count() or 8)
-    subprocess.run(["make", "-j", jobs], cwd=str(cmake_build_dir), check=True)
+    subprocess.run(["make", "-j", jobs], cwd=cmake_build_dir, check=True)
 
     vpp_sim_path = cmake_build_dir / "vpp_sim"
     if not vpp_sim_path.exists():

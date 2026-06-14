@@ -315,7 +315,7 @@ def build_emu_project(config: LinkerConfiguration) -> None:
         logger.info("EMU compile adding %d user include dir(s)",
                     len(user_include_dirs))
     logger.info("Building emulation executable: %s", " ".join(cmd))
-    subprocess.run(cmd, cwd=str(config.build_dir), check=True)
+    subprocess.run(cmd, cwd=config.build_dir, check=True)
     logger.info("Emulation build outputs in %s", config.build_dir)
 
 
