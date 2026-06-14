@@ -129,7 +129,7 @@ def _generate_top_wrapper_pdi_with_bootgen(impl_dir: Path) -> Path:
             "-o",
             output_pdi.name,
         ],
-        cwd=str(impl_dir),
+        cwd=impl_dir,
         check=True,
     )
 
@@ -185,7 +185,7 @@ def generate_base_pdi_with_aved(config: CommandConfiguration) -> Path:
     logger.info("Running AVED build script in %s", aved_hw_dir)
     subprocess.run(
         ["bash", "build_all.sh"],
-        cwd=str(aved_hw_dir),
+        cwd=aved_hw_dir,
         env=_clean_cross_build_env(),
         check=True,
     )
@@ -223,7 +223,7 @@ def create_build_project(
         if action:
             cmd.append(action)
 
-        subprocess.run(cmd, cwd=str(config.build_dir), check=True,
+        subprocess.run(cmd, cwd=config.build_dir, check=True,
                        env=_environment_with_udev_ld_preload())
 
 
@@ -323,7 +323,7 @@ def _run_rm_build(config: LinkerConfiguration, rm_kind: RM_KIND) -> None:
             )
             cmd.extend(["--opt-post-tcl", str(opt_post_tcl)])
 
-        subprocess.run(cmd, cwd=str(config.build_dir), check=True,
+        subprocess.run(cmd, cwd=config.build_dir, check=True,
                        env=_environment_with_udev_ld_preload())
 
     if rm_kind == RM_KIND.SLASH_PROJECT:
