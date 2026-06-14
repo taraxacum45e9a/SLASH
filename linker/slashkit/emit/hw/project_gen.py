@@ -226,6 +226,8 @@ def create_build_project(
         if action:
             cmd.append(action)
 
+        cmd.append(str(config.n_jobs))
+
         subprocess.run(cmd, cwd=config.build_dir, check=True,
                        env=_environment_with_udev_ld_preload())
 
