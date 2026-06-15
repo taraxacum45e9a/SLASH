@@ -45,9 +45,11 @@ ENV LC_ALL=en_US.utf-8
 RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 
 # Adding the slash user
-RUN if id -u $USER_ID >/dev/null 2>&1; then \
+RUN apt-get install -y --no-install-recommends sudo && \
+    if id -u $USER_ID >/dev/null 2>&1; then \
         userdel -r $(id -nu $USER_ID); \
     fi && \
-    useradd -m -U -u $USER_ID slash
+    useradd -m -U -u $USER_ID slash && \
+    echo "slash ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
 USER slash
