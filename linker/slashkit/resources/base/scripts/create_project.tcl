@@ -133,6 +133,8 @@ if {![file exists $proj_exists]} {
   # Wrapper / XDC / build
   safe_source [file normalize [file join $src_dir "make_wrapper.tcl"]]
   safe_source [file normalize [file join $src_dir "add_constraints.tcl"]]
+
+  archive_project "${project_name}.xpr.zip" -force -include_local_ip_cache -temp_dir "/tmp/${project_name}.[pid]"
 } else {
   puts "INFO: Project already exists; opening '$proj_exists'."
   open_project [file normalize [file join $cwd "slash.xpr"]]
@@ -148,6 +150,8 @@ if {![file exists $proj_exists]} {
 if {$do_build} {
   safe_source [file normalize [file join $src_dir "build_project.tcl"]]
   build_project $project_name $jobs
+  archive_project "${project_name}.impl.zip" -force -include_local_ip_cache -temp_dir "/tmp/${project_name}.[pid]"
+
   puts "INFO: Project build complete."
 } elseif {$do_create} {
   puts "INFO: Project creation complete (build skipped)."
