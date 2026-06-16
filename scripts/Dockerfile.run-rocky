@@ -13,7 +13,7 @@ COPY rpm/*.rpm /tmp
 RUN dnf install -y /tmp/*.rpm
 
 # Setting timezone and locale for Vivado
-ENV TZ="Europe/Dublin"
+ARG TZ="Europe/Dublin"
 RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 ENV LC_ALL=en_US.utf-8
 
@@ -22,6 +22,6 @@ RUN useradd -m -U -u $USER_ID slash
 USER slash
 
 # Again, setting timezone and locale for Vivado
-ENV TZ="Europe/Dublin"
+ARG TZ="Europe/Dublin"
 ENV LC_ALL=en_US.utf-8
 
