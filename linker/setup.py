@@ -1,23 +1,28 @@
-import argparse
 import importlib.resources as resources
 import logging
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
+import zipfile
 from pathlib import Path
-from typing import Optional
+from subprocess import check_call
+from typing import Literal, override
 
-from slashkit.core.command_config import CommandConfiguration
-from slashkit.emit.hw import _environment_with_udev_ld_preload
+from setuptools import Command, setup
+from setuptools.command.build import build
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s:%(funcName)s: %(message)s",
+)
 
 
 logger = logging.getLogger(__name__)
 
-
 AVED_DESIGN_NAME = "amd_v80_gen5x8_25.1"
-
 
 # Host toolchain flags injected by dpkg-buildpackage (e.g. -mno-omit-leaf-frame-pointer,
 # -fcf-protection, -fstack-clash-protection) are not understood by the arm-xilinx-eabi
@@ -37,38 +42,24 @@ _CROSS_BUILD_ENV_BLOCKLIST = (
 
 
 def _clean_cross_build_env() -> dict[str, str]:
-    env = {k: v for k, v in os.environ.items()
-           if k not in _CROSS_BUILD_ENV_BLOCKLIST}
+    env = {k: v for k, v in os.environ.items() if k not in _CROSS_BUILD_ENV_BLOCKLIST}
     return {k: v for k, v in env.items() if not k.startswith("DEB_")}
 
 
-def _copy_checked(src: Path, dest: Path) -> None:
-    if not src.exists():
-        raise FileNotFoundError(f"Expected file not found: {src}")
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(src, dest)
-
-
-def _copy_files(src_files: list[Path], destination: Path) -> None:
+def _copy_file(src_file: Path, destination: Path) -> None:
     destination.mkdir(parents=True, exist_ok=True)
-    for src in src_files:
-        dst = destination / src.name
-        # Allow install_dir to match the staging directory without failing on no-op copies.
-        if dst.exists():
-            try:
-                if src.samefile(dst):
-                    logger.info(
-                        "Skipping copy because source and destination are the same file: %s", src)
-                    continue
-            except FileNotFoundError:
-                pass
-        shutil.copy2(src, dst)
+    try:
+        shutil.copy2(src_file, destination / src_file.name)
+    except shutil.SameFileError:
+        logger.info(
+            "Skipping copy because source and destination are the same file: %s",
+            src_file,
+        )
 
 
 def _copy_tree(src_dir: Path, destination: Path) -> None:
-    target_dir = destination / src_dir.name
-    target_dir.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(src_dir, target_dir, dirs_exist_ok=True)
+    destination.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(src_dir, destination / src_dir.name, dirs_exist_ok=True)
 
 
 def _ensure_boot_device_pcie_in_bif(bif_path: Path) -> None:
@@ -96,8 +87,7 @@ def _generate_top_wrapper_pdi_with_bootgen(impl_dir: Path) -> Path:
     output_pdi = impl_dir / "top_wrapper.pdi"
 
     _ensure_boot_device_pcie_in_bif(bif_path)
-    logger.info("Running bootgen in %s to generate %s",
-                impl_dir, output_pdi.name)
+    logger.info("Running bootgen in %s to generate %s", impl_dir, output_pdi.name)
     subprocess.run(
         [
             "bootgen",
@@ -114,216 +104,362 @@ def _generate_top_wrapper_pdi_with_bootgen(impl_dir: Path) -> Path:
     )
 
     if not output_pdi.exists():
-        raise FileNotFoundError(
-            f"Expected bootgen output not found: {output_pdi}")
+        raise FileNotFoundError(f"Expected bootgen output not found: {output_pdi}")
     return output_pdi
 
 
-def generate_base_pdi_with_aved(config: CommandConfiguration) -> Path:
-    aved_dir = config.build_dir / "AVED"
+class BuildAVED:
+    def __init__(
+        self,
+        aved_repo: str,
+        aved_ref: str,
+        build_dir: Path,
+        top_wrapper_pdi: Path,
+    ):
+        self.aved_repo = aved_repo
+        self.aved_ref = aved_ref
+        self.top_wrapper_pdi = top_wrapper_pdi
 
-    aved_hw_dir = aved_dir / "hw" / AVED_DESIGN_NAME
-    aved_build_dir = aved_hw_dir / "build"
-    aved_fpt_dir = aved_hw_dir / "fpt"
-    aved_fw_profile_dir = aved_dir / "fw" / "AMC" / \
-        "src" / "profiles" / "v80"
+        self._aved = build_dir / "AVED"
+        self._aved_hw = self._aved / "hw" / AVED_DESIGN_NAME
 
-    logger.info("Starting AVED base build for %s", config.project_name)
-    aved_build_dir.mkdir(parents=True, exist_ok=True)
+    def __call__(self):
+        self.clone()
+        self.prepare()
 
-    static_impl_dir = config.build_dir / "slash.runs" / "impl_1"
-    regenerated_top_wrapper_pdi = _generate_top_wrapper_pdi_with_bootgen(
-        static_impl_dir)
-    _copy_checked(regenerated_top_wrapper_pdi,
-                  aved_build_dir / "top_wrapper.pdi")
+        # Run the AVED build script
+        logger.info("Running AVED build script in %s", self._aved_hw)
+        subprocess.run(
+            ["bash", "build_all.sh"],
+            cwd=self._aved_hw,
+            env=_clean_cross_build_env(),
+            check=True,
+        )
 
-    files_to_copy = [("build_all.sh", aved_hw_dir), ("profile_hal.h", aved_fw_profile_dir),
-                     ("pdi_combine.bif", aved_fpt_dir), (f"{AVED_DESIGN_NAME}.xsa", aved_build_dir)]
+        # Collect the generated PDI
+        aved_pdi = self._aved_hw / f"{AVED_DESIGN_NAME}.pdi"
+        if not aved_pdi.exists():
+            raise FileNotFoundError(f"Expected AVED output not found: {aved_pdi}")
+        logger.info("AVED fallback complete. Generated %s", aved_pdi)
 
-    for (file_name, target_dir) in files_to_copy:
-        with resources.path("slashkit.resources.aved", file_name) as in_path:
-            _copy_checked(in_path, target_dir / file_name)
+        return aved_pdi
 
-    logger.info("Running AVED build script in %s", aved_hw_dir)
-    subprocess.run(
-        ["bash", "build_all.sh"],
-        cwd=str(aved_hw_dir),
-        env=_clean_cross_build_env(),
-        check=True,
-    )
+    def clone(self):
+        if (self._aved / ".git").exists():
+            logger.warning(
+                "AVED already cloned. Please remove %s to force a fresh clone.",
+                self._aved,
+            )
+            return
 
-    aved_pdi = aved_hw_dir / f"{AVED_DESIGN_NAME}.pdi"
-    if not aved_pdi.exists():
-        raise FileNotFoundError(f"Expected AVED output not found: {aved_pdi}")
-    logger.info("AVED fallback complete. Generated %s", aved_pdi)
-    return aved_pdi
+        check_call(
+            [
+                "git",
+                "clone",
+                "--recurse-submodules",
+                "-b",
+                self.aved_ref,
+                self.aved_repo,
+                self._aved,
+            ]
+        )
 
+    def prepare(self):
+        # Inject the top wrapper PDI generated by Vivado into the AVED hardware
+        # directory to be used as the base for the AVED build.
+        _copy_file(self.top_wrapper_pdi, self._aved_hw / "build")
 
-def create_build_project(
-    config: CommandConfiguration,
-    action: Optional[str] = None
-) -> None:
-    log_path = config.build_dir / "vivado.log"
-
-    with resources.path("slashkit.resources.base.scripts", "create_project.tcl") as tcl_path:
-        if not tcl_path.exists():
-            raise FileNotFoundError(
-                f"create_project.tcl not found: {tcl_path}")
-        cmd = [
-            config.vivado_bin,
-            "-mode",
-            "batch",
-            "-nojournal",
-            "-log",
-            str(log_path),
-            "-source",
-            str(tcl_path),
-            "-tclargs",
-            config.project_name,
+        # Patch AVED
+        files_to_copy = [
+            ("build_all.sh", self._aved_hw),
+            ("profile_hal.h", self._aved / "fw/AMC/src/profiles/v80"),
+            ("pdi_combine.bif", self._aved_hw / "fpt"),
+            (f"{AVED_DESIGN_NAME}.xsa", self._aved_hw / "build"),
         ]
 
-        if config.ip_repository.exists():
-            cmd.append(config.ip_repository)
-
-        if action:
-            cmd.append(action)
-
-        cmd.append(str(config.n_jobs))
-
-        subprocess.run(cmd, cwd=str(config.build_dir), check=True,
-                       env=_environment_with_udev_ld_preload())
+        for file_name, target_dir in files_to_copy:
+            with resources.path("slashkit.resources.aved", file_name) as in_path:
+                _copy_file(in_path, target_dir)
 
 
-def install_static_shell(config: InstallerConfiguration) -> None:
-    static_shell_dir = config.out_dir / "static_shell"
-    static_shell_dir.mkdir(parents=True, exist_ok=True)
+class BuildFPGA:
+    def __init__(
+        self,
+        vivado_bin: Path,
+        project_name: str,
+        build_dir: Path,
+        jobs: int = 14,
+    ):
+        self.vivado_bin = vivado_bin
+        self.project_name = project_name
+        self.build_dir = build_dir
+        self.jobs = jobs
 
-    # Cloning the AVED repository into the build directory
-    # We're doing this early so that errors are caught *before* the 10-hour Vivado run!
-    subprocess.run([
-        "git", "clone",
-        "--recurse-submodules",
-        "-b", config.aved_ref,
-        config.aved_repo,
-        config.build_dir / "AVED"
-    ], check=True)
+        self._slash = self.build_dir / "slash"
+        self._proj = self.build_dir / f"{self.project_name}.xpr.zip"
+        self._impl = self.build_dir / f"{self.project_name}.impl.zip"
 
-    create_build_project(config)
+    def __call__(self):
+        self.build()
 
-    impl_dir = config.build_dir / "slash.runs" / "impl_1"
-    dcp_sources = (
-        impl_dir / "top_wrapper_routed_bb.dcp",
-        impl_dir / "static_shell_slash.dcp",
-        impl_dir / "static_shell_service_layer.dcp",
-    )
-    for src in dcp_sources:
-        if not src.exists():
-            raise FileNotFoundError(
-                f"Expected install artifact not found: {src}")
-    _copy_files(list(dcp_sources), static_shell_dir)
+        self._reinstate_project(self._impl)
+        assert self._slash.is_dir()
 
-    src_dirs = config.build_dir / "slash.srcs" / "sources_1" / "bd"
-    for src_dir in (src_dirs / "slash_base", src_dirs / "service_layer"):
-        if not src_dir.is_dir():
-            raise FileNotFoundError(
-                f"Expected install BD directory not found: {src_dir}")
-        _copy_tree(src_dir, static_shell_dir)
+        regenerated_top_wrapper_pdi = _generate_top_wrapper_pdi_with_bootgen(
+            self._slash / "slash.runs/impl_1"
+        )
 
-    aved_pdi_path = generate_base_pdi_with_aved(config)
-    if not aved_pdi_path.exists():
-        raise FileNotFoundError(
-            f"Expected AVED PDI not found in results/base: {aved_pdi_path}")
-    _copy_files([aved_pdi_path], static_shell_dir)
+        return self._slash, regenerated_top_wrapper_pdi
 
-    def add_init_files(path: Path):
-        (path / "__init__.py").touch()
-        for sub_path in path.iterdir():
-            if not sub_path.is_dir():
+    def build(self):
+        if self._impl.exists():
+            return
+
+        if not self._proj.exists():
+            self.create_project()
+
+            if not self._proj.exists():
+                raise FileNotFoundError(f"Project archive not found: {self._proj}")
+
+        if not self._impl.exists():
+            self.build_project()
+
+            if not self._impl.exists():
+                raise FileNotFoundError(f"Project archive not found: {self._impl}")
+
+    def build_iprepo(self) -> Path:
+        _iprepo = Path("iprepo").resolve()
+        _build_dir = self.build_dir / "iprepo"
+
+        # Check for SMBus IP core in the IP repository before continuing
+        if not list(_iprepo.rglob("smbus*/component.xml")):
+            raise FileNotFoundError(f"Expected SMBus IP core not found in {_iprepo}.")
+
+        _copy_tree(_iprepo, self.build_dir)
+        assert _build_dir.is_dir()
+
+        # Build the HLS IP cores
+        check_call(["make", f"-j{self.jobs}"], cwd=_build_dir)
+
+        # Extract all built IP cores into the IP repository for Vivado to use
+        for subdir in _build_dir.iterdir():
+            if not subdir.is_dir():
                 continue
-            add_init_files(sub_path)
-    add_init_files(static_shell_dir)
+
+            src = subdir / f"ip/{subdir.name}.zip"
+            if not src.exists():
+                continue
+
+            dst = (_iprepo / subdir.name).resolve()
+            check_call(["unzip", "-o", src, "-d", dst])
+
+        return _iprepo
+
+    def create_project(self):
+        iprepo = self.build_iprepo()
+        if self._slash.exists():
+            shutil.rmtree(self._slash)
+
+        self._slash.mkdir(parents=True, exist_ok=False)
+        self._launch_vivado(action="create", iprepo=iprepo)
+
+    def build_project(self):
+        self._reinstate_project(self._proj)
+        assert self._slash.is_dir()
+        self._launch_vivado(action="build")
+
+    def _reinstate_project(self, archive: Path):
+        assert zipfile.is_zipfile(archive), f"Expected a zip archive: {archive}"
+
+        if self._slash.exists():
+            shutil.rmtree(self._slash)
+
+        check_call(["unzip", archive, "-d", self._slash.parent])
+
+    def _launch_vivado(
+        self,
+        iprepo: Path | None = None,
+        action: Literal["create", "build", "all"] = "all",
+    ) -> None:
+        with resources.path(
+            "slashkit.resources.base.scripts", "create_project.tcl"
+        ) as tcl_path:
+            if not tcl_path.exists():
+                raise FileNotFoundError(f"create_project.tcl not found: {tcl_path}")
+
+            cmd = [
+                self.vivado_bin,
+                "-mode",
+                "batch",
+                "-source",
+                tcl_path,
+                "-tclargs",
+                self.project_name,
+            ]
+
+            if iprepo and iprepo.exists():
+                cmd.append(iprepo)
+
+            if action:
+                cmd.append(action)
+
+            if self.jobs:
+                cmd.append(str(self.jobs))
+
+            cmd = [str(arg) for arg in cmd]
+            logger.info(shlex.join(cmd))
+            check_call(cmd, cwd=self._slash)
+
+        # Move any generated project archives to the build directory
+        for archive in self._slash.glob("*.zip"):
+            logger.info(f"Found archive: {archive}")
+            archive.rename(self.build_dir / archive.name)
 
 
-####################################################################
+class install_static(Command):
+    description = """
+    Purpose:
+      The 'install' subcommand builds the static shell required for
+      hardware builds. This is a one-time setup operation that creates base images
+      used by the 'link' subcommand when targeting hardware (-p hw).
+
+    When to Use:
+      - During initial installation and/or packaging of slashkit
+      - When the static shell definition needs to be regenerated
+
+      Most users will NOT need to run this command regularly. It is only required
+      during linker installation/setup.
+
+    What It Does:
+      1. Builds the static shell base images from the resource directory
+      2. Generates necessary Vivado synthesis artifacts
+      3. Creates reusable partial designs for hardware linking
+
+      WARNING: This operation involves full Vivado synthesis and implementation,
+      which takes significant time (multiple hours depending on the system).
+
+    Build Artifacts:
+      The build directory (--build-dir) will contain Vivado projects, checkpoints,
+      and logs. This directory can be removed after successful installation.
+    """
+    user_options = [
+        (
+            "vivado=",
+            None,
+            "Vivado binary to use for linking. If not given, it will be derived from PATH.",
+        ),
+        (
+            "build-dir=",
+            None,
+            "The build directory for the installer. Default: ./install.prj",
+        ),
+        (
+            "aved-repo=",
+            None,
+            "The AVED git repository to check out. Default: https://github.com/Xilinx/AVED.git",
+        ),
+        (
+            "aved-ref=",
+            None,
+            "The AVED git ref to check out. Default: amd_v80_gen5x8_25.1_xbtest_20251113",
+        ),
+        (
+            "out-dir=",
+            None,
+            "The resource directory to install the artifacts to.",
+        ),
+        (
+            "jobs=",
+            None,
+            "The number of parallel jobs to use for building.",
+        ),
+    ]
+
+    @override
+    def initialize_options(self):
+        self.vivado = shutil.which("vivado")
+        self.project_name = "slash_install"
+        self.build_dir = "install.prj"
+        self.ip_repository = None
+        self.aved_repo = "https://github.com/Xilinx/AVED.git"
+        self.aved_ref = "amd_v80_gen5x8_25.1_xbtest_20251113"
+        self.out_dir = "slashkit/resources"
+        self.jobs = max((os.cpu_count() or 0) // 2, 1)
+
+    @override
+    def finalize_options(self):
+        self.vivado_bin = self.vivado and Path(self.vivado).expanduser().resolve()
+        if not self.vivado_bin or not self.vivado_bin.exists():
+            raise RuntimeError(
+                "Vivado binary not found in PATH. Please specify with --vivado."
+            )
+
+    @override
+    def run(self):
+        sys.path.insert(0, str(Path(__file__).parent.resolve()))
+
+        fpga_prj, aved_pdi = self._build()
+        self._install(fpga_prj, aved_pdi)
+
+    def _build(self):
+        assert self.vivado_bin
+        self.build_dir = Path(self.build_dir)
+        self.build_dir.mkdir(parents=True, exist_ok=True)
+
+        fpga_prj, regenerated_top_wrapper_pdi = BuildFPGA(
+            vivado_bin=Path(self.vivado_bin),
+            project_name=self.project_name,
+            build_dir=Path(self.build_dir),
+            jobs=self.jobs,
+        )()
+
+        aved_pdi = BuildAVED(
+            aved_repo=self.aved_repo,
+            aved_ref=self.aved_ref,
+            build_dir=Path(self.build_dir),
+            top_wrapper_pdi=regenerated_top_wrapper_pdi,
+        )()
+
+        return fpga_prj, aved_pdi
+
+    def _install(self, fpga_prj: Path, aved_pdi: Path):
+        static_shell_dir = Path(self.out_dir) / "static_shell"
+
+        # Install IP Repository
+        _copy_tree(fpga_prj / "slash.ipdefs/iprepo", Path(self.out_dir) / "base")
+
+        # Install important DCPs and BD sources needed for linking.
+        impl_1 = fpga_prj / "slash.runs/impl_1"
+        _copy_file(impl_1 / "top_wrapper_routed_bb.dcp", static_shell_dir)
+        _copy_file(impl_1 / "static_shell_slash.dcp", static_shell_dir)
+        _copy_file(impl_1 / "static_shell_service_layer.dcp", static_shell_dir)
+
+        sources_1 = fpga_prj / "slash.srcs/sources_1"
+        _copy_tree(sources_1 / "bd/slash_base", static_shell_dir)
+        _copy_tree(sources_1 / "bd/service_layer", static_shell_dir)
+
+        # Install the final AVED PDI into the static shell directory
+        _copy_file(aved_pdi, static_shell_dir)
+
+        # Add __init__.py files to make the static shell directory a proper
+        # Python package, which allows us to
+        def add_init_files(path: Path):
+            (path / "__init__.py").touch()
+            for sub_path in path.iterdir():
+                if not sub_path.is_dir():
+                    continue
+                add_init_files(sub_path)
+
+        add_init_files(static_shell_dir)
 
 
-INSTALL_HELP_EPILOG = f"""
-Purpose:
-  The 'install' subcommand builds the static shell required for
-  hardware builds. This is a one-time setup operation that creates base images
-  used by the 'link' subcommand when targeting hardware (-p hw).
-
-When to Use:
-  - During initial installation and/or packaging of slashkit
-  - When the static shell definition needs to be regenerated
-
-  Most users will NOT need to run this command regularly. It is only required
-  during linker installation/setup.
-
-What It Does:
-  1. Builds the static shell base images from the resource directory
-  2. Generates necessary Vivado synthesis artifacts
-  3. Creates reusable partial designs for hardware linking
-
-  WARNING: This operation involves full Vivado synthesis and implementation,
-  which takes significant time (multiple hours depending on the system).
-
-Build Artifacts:
-  The build directory (--build-dir) will contain Vivado projects, checkpoints,
-  and logs. This directory can be removed after successful installation.
-
-Example:
-  {sys.argv[0]} install --build-dir ./install.prj --jobs 16 --out-dir linker/slashkit/resources
-"""
+class build_with_static(build):
+    sub_commands = [("install_static", None)] + build.sub_commands
 
 
-class InstallerConfiguration(CommandConfiguration):
-    @classmethod
-    def populate_argument_parser(cls, ap: argparse.ArgumentParser):
-        super().populate_argument_parser(ap)
-        ap.description = "Build and install base images for hardware builds."
-        ap.epilog = INSTALL_HELP_EPILOG
-        ap.add_argument("--build-dir", required=False, type=Path, default=Path(
-            "./install.prj"), help="The build directory for the installer. Default: ./install_prj")
-        ap.add_argument("--aved-repo", required=False, type=str, default="https://github.com/Xilinx/AVED.git",
-                        help="The AVED git repository to check out. Default: https://github.com/Xilinx/AVED.git")
-        ap.add_argument("--aved-ref", required=False, type=str, default="amd_v80_gen5x8_25.1_xbtest_20251113",
-                        help="The AVED git ref to check out. Default: amd_v80_gen5x8_25.1_xbtest_20251113")
-        ap.add_argument("--out-dir", required=True, type=Path,
-                        help="The resource directory to install the artifacts to. "
-                        + "If you have checked out the SLASH repository, this would be linker/slashkit/resources")
-
-    def __init__(self, args: argparse.Namespace):
-        super().__init__(args)
-
-        self._build_dir: Path = args.build_dir.expanduser().resolve()
-        if self._build_dir.is_dir():
-            shutil.rmtree(self._build_dir)
-        self._build_dir.mkdir(parents=True)
-
-        self._aved_repo: str = args.aved_repo
-        self._aved_ref: str = args.aved_ref
-
-        self._out_dir: Path = args.out_dir.expanduser().resolve()
-        if not self._out_dir.is_dir():
-            raise FileNotFoundError(self._out_dir)
-
-    @property
-    def project_name(self) -> str:
-        return "slash_install"
-
-    @property
-    def build_dir(self) -> Path:
-        return self._build_dir
-
-    @property
-    def aved_repo(self) -> str:
-        return self._aved_repo
-
-    @property
-    def aved_ref(self) -> str:
-        return self._aved_ref
-
-    @property
-    def out_dir(self) -> Path:
-        return self._out_dir
+setup(
+    cmdclass={
+        "install_static": install_static,
+        "build": build_with_static,
+    },
+)
