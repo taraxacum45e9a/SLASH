@@ -29,7 +29,6 @@ from slashkit.emit.hw.project_gen import (
     build_service_layer_rm,
     build_slash_rm,
     generate_util_report,
-    install_static_shell,
 )
 from slashkit.emit.sim.tcl_gen import generate_sim_tcl
 from slashkit.emit.emu.tcl_gen import generate_emu_tcl
@@ -37,7 +36,7 @@ from slashkit.emit.sim.project_gen import create_sim_project, build_sim_project
 from slashkit.emit.emu.project_gen import build_emu_project, package_emu_artifacts
 
 from slashkit.emit.metadata.prog_image import build_vbin
-from slashkit.core.command_config import LinkerConfiguration, Platform, InstallerConfiguration, CommandConfiguration
+from slashkit.core.command_config import LinkerConfiguration, Platform
 
 
 def _format_duration(seconds: float) -> str:
@@ -46,10 +45,6 @@ def _format_duration(seconds: float) -> str:
     minutes = (total % 3600) // 60
     secs = total % 60
     return f"{hours:02d}:{minutes:02d}:{secs:02d}"
-
-
-def profiled(func) -> None:
-    return lambda: run_with_profiling(func.__name__, func)
 
 
 def run_with_profiling(label: str, func) -> None:
@@ -170,11 +165,6 @@ def main():
     link_parser = sub_parsers.add_parser("link")
     LinkerConfiguration.populate_argument_parser(link_parser)
     link_parser.set_defaults(config_class=LinkerConfiguration, operation=link)
-
-    install_parser = sub_parsers.add_parser("install")
-    InstallerConfiguration.populate_argument_parser(install_parser)
-    install_parser.set_defaults(
-        config_class=InstallerConfiguration, operation=install_static_shell)
 
     args = ap.parse_args()
 
