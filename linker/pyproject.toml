@@ -19,7 +19,7 @@ git_describe_command = "git describe --tags --long --match \"v*\""
 
 [tool.setuptools.packages.find]
 include = ["slashkit*"]
-exclude = ["test*"]
+exclude = ["test*", "iprepo*"]
 
 [tool.setuptools.package-data]
 "slashkit" = ["resources/**/*"]
