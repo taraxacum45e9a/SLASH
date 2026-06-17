@@ -25,8 +25,18 @@ set -euxo pipefail
 # SLASH root
 cd "$(dirname "$0")/.."
 
-make -C linker/slashkit/resources/base/iprepo
+rm -rf linker/dist linker/build linker/slashkit.egg-info
+rm -rf .venv
+python3 -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip build
 
 pushd linker
-python3 -m slashkit install --out-dir slashkit/resources
+
+python3 \
+    -m build \
+    -C--build-option=install_static \
+    -C--build-option=--build-dir \
+    -C--build-option="$(pwd)/install.prj"
+
 popd
