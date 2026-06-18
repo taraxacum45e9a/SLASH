@@ -98,7 +98,11 @@ puts "BUILD DIR:      $cwd"
 proc safe_source {tcl_path} {
   puts "INFO: Sourcing $tcl_path ..."
   set rc [catch {source $tcl_path} result options]
+
   puts "INFO: Finished sourcing $tcl_path"
+  puts "  rc       : $rc"
+  puts "  result   : $result"
+  puts "  options  : $options"
 
   if { $rc == 1 } {
     puts "ERROR: [dict get $options -errorinfo]"
