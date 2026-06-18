@@ -97,7 +97,14 @@ puts "BUILD DIR:      $cwd"
 
 proc safe_source {tcl_path} {
   puts "INFO: Sourcing $tcl_path ..."
-  catch {source $tcl_path} result
+  set rc [catch {source $tcl_path} result options]
+  puts "INFO: Finished sourcing $tcl_path"
+
+  if { $rc == 1 } {
+    puts "ERROR: [dict get $options -errorinfo]"
+    exit 1
+  }
+
   if {[string is integer -strict $result] && $result != 0} {
     puts "EXIT: '$tcl_path' returned $result"
     exit 1
