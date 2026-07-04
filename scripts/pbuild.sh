@@ -30,11 +30,14 @@ cmake --build pbuild/smi
 if [[ -z "${SLASH_PKG_SKIP_ROOT_DESIGN_BUILD:-}" ]]; then
     bash scripts/root-design-clean.sh
     bash scripts/root-design-build.sh
-fi
 
-rm -rf linker/dist linker/build linker/slashkit.egg-info
-rm -rf .venv
-python3 -m venv .venv
-source .venv/bin/activate
-pip install --upgrade pip
-pip wheel --no-deps --wheel-dir ./linker/dist ./linker/
+    rm -rf linker/dist linker/build linker/slashkit.egg-info
+    rm -rf .venv
+    python3 -m venv .venv
+    source .venv/bin/activate
+    pip install --upgrade pip
+    pip wheel --no-deps --wheel-dir ./linker/dist ./linker/
+elif ! compgen -G 'linker/dist/slashkit-*.whl' >/dev/null; then
+    echo "SLASH_PKG_SKIP_ROOT_DESIGN_BUILD is set, but no slashkit wheel found in linker/dist" >&2
+    exit 1
+fi
