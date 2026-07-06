@@ -151,12 +151,24 @@ bool Buffer::isClosed() const noexcept
 
 std::fstream Buffer::fstream(std::ios_base::openmode mode) const
 {
-    (void)mode;
     if (isClosed()) {
         throw std::runtime_error("Buffer is closed");
     }
 
-    throw std::runtime_error("Buffer qpair fds are ioctl-only; use syncToDevice/syncFromDevice");
+    int fd = getFd();
+    if (fd < 0) {
+        throw std::runtime_error("Buffer FD is invalid");
+    }
+
+    std::string path = "/proc/self/fd/" + std::to_string(fd);
+
+    std::fstream stream;
+    stream.open(path, mode);
+    if (!stream.is_open()) {
+        throw std::runtime_error("Failed to open fstream for buffer");
+    }
+
+    return stream;
 }
 
 void Buffer::syncToDevice(uint64_t offset, uint64_t size)

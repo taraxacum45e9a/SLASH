@@ -132,11 +132,11 @@ Device Session::getDevice(size_t i) const {
         info.pci.subsystem_device_id,
         [&](const Device& device, uint8_t num) { return getBar(device, num); },
         [&](const Device& device, const slash_qdma_qpair_add& cfg) { return createQdmaQpair(device, cfg); },
-        [&](const Device& device, BufferAllocType type, uint64_t size, uint64_t arg, BufferAllocDir dir, MmChannel mm) {
-            return openBuffer(device, type, size, arg, dir, mm);
+        [&](const Device& device, BufferAllocType type, uint64_t size, uint64_t arg, BufferAllocDir dir) {
+            return openBuffer(device, type, size, arg, dir);
         },
-        [&](const Device& device, uint64_t phys_addr, uint64_t size, BufferAllocDir dir, MmChannel mm) {
-            return openBufferRaw(device, phys_addr, size, dir, mm);
+        [&](const Device& device, uint64_t phys_addr, uint64_t size, BufferAllocDir dir) {
+            return openBufferRaw(device, phys_addr, size, dir);
         },
         [&](const Device& device, HotplugOp op, uint8_t function) { return hotplugOp(device, op, function); },
         [&](const Device& device, int input_fd) { return designWrite(device, input_fd); },
@@ -197,11 +197,11 @@ Device Session::getDeviceByBdf(std::string_view bdf) const {
         info.pci.subsystem_device_id,
         [&](const Device& device, uint8_t num) { return getBar(device, num); },
         [&](const Device& device, const slash_qdma_qpair_add& cfg) { return createQdmaQpair(device, cfg); },
-        [&](const Device& device, BufferAllocType type, uint64_t size, uint64_t arg, BufferAllocDir dir, MmChannel mm) {
-            return openBuffer(device, type, size, arg, dir, mm);
+        [&](const Device& device, BufferAllocType type, uint64_t size, uint64_t arg, BufferAllocDir dir) {
+            return openBuffer(device, type, size, arg, dir);
         },
-        [&](const Device& device, uint64_t phys_addr, uint64_t size, BufferAllocDir dir, MmChannel mm) {
-            return openBufferRaw(device, phys_addr, size, dir, mm);
+        [&](const Device& device, uint64_t phys_addr, uint64_t size, BufferAllocDir dir) {
+            return openBufferRaw(device, phys_addr, size, dir);
         },
         [&](const Device& device, HotplugOp op, uint8_t function) { return hotplugOp(device, op, function); },
         [&](const Device& device, int input_fd) { return designWrite(device, input_fd); },
@@ -289,8 +289,7 @@ Buffer Session::openBuffer(
     BufferAllocType allocType,
     uint64_t size,
     uint64_t allocArg,
-    BufferAllocDir allocDir,
-    MmChannel mmChannel
+    BufferAllocDir allocDir
 ) const {
     if (isClosed()) {
         throw Error(VRTD_RET_BAD_LIB_CALL);
@@ -305,7 +304,6 @@ Buffer Session::openBuffer(
         static_cast<uint32_t>(allocDir),
         allocArg,
         size,
-        static_cast<vrtd_mm_channel>(static_cast<uint32_t>(mmChannel)),
         &raw
     );
     if (ret != VRTD_RET_OK) {
@@ -323,8 +321,7 @@ Buffer Session::openBufferRaw(
     const Device& device,
     uint64_t phys_addr,
     uint64_t size,
-    BufferAllocDir allocDir,
-    MmChannel mmChannel
+    BufferAllocDir allocDir
 ) const {
     if (isClosed()) {
         throw Error(VRTD_RET_BAD_LIB_CALL);
@@ -338,7 +335,6 @@ Buffer Session::openBufferRaw(
         phys_addr,
         size,
         static_cast<uint32_t>(allocDir),
-        static_cast<vrtd_mm_channel>(static_cast<uint32_t>(mmChannel)),
         &raw
     );
     if (ret != VRTD_RET_OK) {

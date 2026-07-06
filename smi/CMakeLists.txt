@@ -40,7 +40,6 @@ project(
 )
 
 option(SMI_INCLUDE_VRT "Include vrtd as subdirectory instead of building from system" OFF)
-option(SMI_ENABLE_QDMA_DRIVER_BACKEND "Build validate --use-qdma-driver backend" ON)
 
 include(GNUInstallDirs)
 
@@ -54,10 +53,6 @@ if(NOT TARGET vrt::vrt)
   message(FATAL_ERROR
     "vrt package is missing target vrt::vrt. "
     "Build and install vrt first (cmake --install), then configure smi again.")
-endif()
-
-if(NOT TARGET slash::slash)
-  find_package(slash REQUIRED CONFIG)
 endif()
 
 find_package(CLI11 CONFIG REQUIRED)

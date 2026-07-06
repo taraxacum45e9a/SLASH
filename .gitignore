@@ -85,6 +85,3 @@ driver/kcompat/.scratch/
 
 # Python test coverage
 .coverage
-
-# Project-local scratch space
-/tmp/

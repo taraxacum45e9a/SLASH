@@ -190,7 +190,6 @@ private:
      * @param size      Requested size in bytes.
      * @param allocArg  Allocation argument (HBM region index for HBM).
      * @param allocDir  QDMA transfer direction.
-     * @param mmChannel AXI-MM/NoC channel selection for the queue pair.
      * @return An owning @c Buffer.
      * @throws vrtd::Error on error.
      */
@@ -199,8 +198,7 @@ private:
         BufferAllocType allocType,
         uint64_t size,
         uint64_t allocArg,
-        BufferAllocDir allocDir,
-        MmChannel mmChannel
+        BufferAllocDir allocDir
     ) const;
 
     /**
@@ -210,7 +208,6 @@ private:
      * @param phys_addr Caller-specified device physical address (bypasses allocator).
      * @param size      Size in bytes.
      * @param allocDir  QDMA transfer direction.
-     * @param mmChannel AXI-MM/NoC channel selection for the queue pair.
      * @return An owning @c Buffer.
      * @throws vrtd::Error on error.
      */
@@ -218,8 +215,7 @@ private:
         const Device& device,
         uint64_t phys_addr,
         uint64_t size,
-        BufferAllocDir allocDir,
-        MmChannel mmChannel
+        BufferAllocDir allocDir
     ) const;
 
     /**
